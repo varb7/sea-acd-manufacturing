@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<config>
+    <source_groups>
+        <source_group_b937994b-b3d0-478c-b7d0-7be226dacbb7>
+            <name>Python Source Group</name>
+            <source_extensions>
+                <source_extension>.py</source_extension>
+            </source_extensions>
+            <status>enabled</status>
+            <type>Python Source Group</type>
+        </source_group_b937994b-b3d0-478c-b7d0-7be226dacbb7>
+    </source_groups>
+    <version>8</version>
+</config>
