@@ -50,14 +50,17 @@ edge_map_gies = {
     (2, 2): 4,  # (1, 1) not DAG but exists (?)
 }
 
-# Edge mapping for Tetrad RFCI binary adjacency
-edge_map_rfci_bin = {
-    # 0/1 adjacency, interpret:
-    # (1,0) forward, (0,1) backward, (1,1) undirected/ambiguous, (0,0) none
+# Edge mapping for RFCI PAG format (compatible with FCI)
+edge_map_rfci_pag = {
+    # 0 reserved for padding
     (0, 0): 1,  # no edge (unpadded)
-    (1, 0): 2,  # forward
-    (0, 1): 3,  # backward
-    (1, 1): 4,  # ambiguous/undirected
+    (1, 1): 2,  # undirected edge (-)
+    (2, 0): 3,  # forward edge (->)
+    (0, 2): 4,  # backward edge (<-)
+    (4, 4): 5,  # ambiguous edge (<->)
+    (2, 2): 6,  # bidirectional
+    (4, 0): 7,  # partial forward
+    (0, 4): 8,  # partial backward
 }
 
 
@@ -117,8 +120,8 @@ def convert_to_graphs(results, dataset):
             # G includes {-1, 0, 1} for GES and GRaSP
             graphs.append(convert_result_to_lg(G, edge_map_ges))
         elif dataset.algorithm == "rfci":
-            # Tetrad RFCI returns 0/1 adjacency
-            graphs.append(convert_result_to_lg(G, edge_map_rfci_bin))
+            # RFCI now returns PAG format (0,1,2,3,4)
+            graphs.append(convert_result_to_lg(G, edge_map_rfci_pag))
         else:
             # GIES: G includes {0, 1}
             # to include padding, we should map this to {1, 2}
