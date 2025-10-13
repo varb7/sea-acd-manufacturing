@@ -64,19 +64,19 @@ def test_algorithm_selector():
 
 def test_edge_mapping():
     """Test the edge mapping for RFCI results."""
-    from data.utils import convert_result_to_lg, edge_map_rfci_bin
+    from data.utils import convert_result_to_lg, edge_map_rfci_pag
     
     print("\nTesting edge mapping...")
     
     try:
-        # Create a simple 3x3 adjacency matrix
+        # Create a simple 3x3 PAG adjacency matrix
         G = np.array([
-            [0, 1, 0],  # 0 -> 1
-            [0, 0, 1],  # 1 -> 2  
+            [0, 2, 0],  # 0 -> 1 (forward edge)
+            [0, 0, 2],  # 1 -> 2 (forward edge)
             [0, 0, 0]   # no outgoing edges
         ])
         
-        edge_attrs = convert_result_to_lg(G, edge_map_rfci_bin)
+        edge_attrs = convert_result_to_lg(G, edge_map_rfci_pag)
         print(f"Edge attributes: {edge_attrs}")
         print("Edge mapping test passed!")
         return True

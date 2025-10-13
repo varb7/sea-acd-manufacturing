@@ -134,15 +134,8 @@ class TetradRFCI:
 
     def _pag_to_adjacency_matrix(self, pag, columns: list) -> np.ndarray:
         """
-        Convert PAG to adjacency matrix with PAG edge types (like FCI).
-        
-        Returns:
-            np.ndarray: PAG adjacency matrix with values:
-            0 = no edge
-            1 = undirected edge (-)
-            2 = forward edge (->)
-            3 = backward edge (<-)
-            4 = ambiguous edge (<->)
+        Mark a→b iff endpoint at a is TAIL and at b is ARROW.
+        Optionally also count a o-> b when count_partial=True.
         """
         n = len(columns)
         adj = np.zeros((n, n), dtype=int)
@@ -157,7 +150,6 @@ class TetradRFCI:
                 e = pag.getEdge(na, nb)
                 if e is None:
                     continue
-                    
                 # Map endpoints relative to (na, nb)
                 if e.getNode1() == na:
                     ea = e.getEndpoint1()
@@ -165,27 +157,14 @@ class TetradRFCI:
                 else:
                     ea = e.getEndpoint2()
                     eb = e.getEndpoint1()
-                
-                # Convert PAG endpoints to PAG values
                 if ea == Endpoint.TAIL and eb == Endpoint.ARROW:
-                    adj[i, j] = 2  # forward edge (->)
-                elif ea == Endpoint.ARROW and eb == Endpoint.TAIL:
-                    adj[j, i] = 2  # backward edge (<-)
-                elif ea == Endpoint.TAIL and eb == Endpoint.TAIL:
-                    adj[i, j] = 1  # undirected edge (-)
+                    adj[i, j] = 1
+                elif self.count_partial and ea == Endpoint.CIRCLE and eb == Endpoint.ARROW:
+                    adj[i, j] = 1
+                elif self.include_undirected:
+                    # treat any connected-but-uncertain as undirected skeleton
+                    adj[i, j] = 1
                     adj[j, i] = 1
-                elif ea == Endpoint.CIRCLE and eb == Endpoint.ARROW:
-                    adj[i, j] = 4  # ambiguous edge (<->)
-                elif ea == Endpoint.ARROW and eb == Endpoint.CIRCLE:
-                    adj[j, i] = 4  # ambiguous edge (<->)
-                elif ea == Endpoint.CIRCLE and eb == Endpoint.CIRCLE:
-                    adj[i, j] = 4  # ambiguous edge (<->)
-                    adj[j, i] = 4
-                elif ea == Endpoint.CIRCLE and eb == Endpoint.TAIL:
-                    adj[i, j] = 4  # ambiguous edge (<->)
-                elif ea == Endpoint.TAIL and eb == Endpoint.CIRCLE:
-                    adj[j, i] = 4  # ambiguous edge (<->)
-                    
         return adj
 
     # ---------------- Public API ----------------
@@ -234,20 +213,6 @@ def run_rfci(
     count_partial: bool = False,
     include_undirected: bool = True,
 ) -> np.ndarray:
-    """
-    Convenience function to run RFCI algorithm.
-    
-    Args:
-        data: Input data as DataFrame or numpy array
-        columns: Column names (required if data is numpy array)
-        alpha: Significance level for independence tests
-        depth: Maximum conditioning set size (-1 for unlimited)
-        count_partial: Whether to count partial orientations as directed
-        include_undirected: Whether to include undirected edges
-        
-    Returns:
-        Binary adjacency matrix (n_vars, n_vars) with dtype=int
-    """
     rfci = TetradRFCI(alpha=alpha, depth=depth, count_partial=count_partial, include_undirected=include_undirected)
     return rfci.run(data, columns)
 

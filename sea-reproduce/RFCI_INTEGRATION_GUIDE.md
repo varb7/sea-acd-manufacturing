@@ -12,11 +12,11 @@ This guide explains how to use your Tetrad RFCI algorithm with the SEA pipeline.
 2. **RFCI Wrapper Function** (`src/data/utils.py`)
    - `run_rfci()` function that wraps the RFCI module
    - Handles data format conversion (numpy array → RFCI input)
-   - Returns binary adjacency matrix compatible with SEA pipeline
+   - Returns PAG format adjacency matrix compatible with SEA pipeline
 
 3. **Edge Mapping** (`src/data/utils.py`)
-   - `edge_map_rfci_bin` maps binary adjacency to SEA's token space
-   - `(1,0)` → forward edge, `(0,1)` → backward edge, `(1,1)` → ambiguous, `(0,0)` → no edge
+   - `edge_map_rfci_pag` maps PAG format to SEA's token space
+   - `(2,0)` → forward edge, `(0,2)` → backward edge, `(1,1)` → undirected, `(4,4)` → ambiguous
 
 4. **Algorithm Registration** (`src/data/dataset.py`)
    - Added RFCI to `get_run_alg()` function
