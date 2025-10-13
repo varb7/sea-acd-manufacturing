@@ -12,12 +12,12 @@ from causallearn.search.ScoreBased.GES import ges
 from causallearn.search.PermutationBased.GRaSP import grasp
 from gies import fit_bic
 import pandas as pd
-# Import your Tetrad RFCI module - adjust path as needed
+# Import RFCI module
 try:
-    from data_dcdi import run_rfci as tetrad_run_rfci
+    from rfci_module import run_rfci as tetrad_run_rfci
 except ImportError:
-    # Fallback: if your RFCI is in a different location, adjust this import
-    print("Warning: Tetrad RFCI module not found. Please ensure data_dcdi.py is accessible.")
+    # Fallback: if RFCI module is not found
+    print("Warning: RFCI module not found. Please ensure rfci_module.py is accessible.")
     tetrad_run_rfci = None
 
 
@@ -196,17 +196,18 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
         np.ndarray: binary adjacency matrix (k_vars, k_vars) with dtype=int
     """
     if tetrad_run_rfci is None:
-        print("Warning: Tetrad RFCI not available, skipping batch")
+        print("Warning: RFCI module not available, skipping batch")
         return None
     
     try:
         k = batch.shape[1]
-        # Create DataFrame with generic column names
-        df = pd.DataFrame(batch, columns=[f"v{i}" for i in range(k)])
+        # Create column names for the variables
+        columns = [f"v{i}" for i in range(k)]
         
-        # Call your Tetrad RFCI function
+        # Call the RFCI function with numpy array and column names
         adj = tetrad_run_rfci(
-            df,
+            batch,
+            columns=columns,
             alpha=alpha,
             depth=depth,
             include_undirected=include_undirected,

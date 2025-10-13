@@ -4,24 +4,29 @@ This guide explains how to use your Tetrad RFCI algorithm with the SEA pipeline.
 
 ## What Was Implemented
 
-1. **RFCI Wrapper Function** (`src/data/utils.py`)
-   - `run_rfci()` function that wraps your Tetrad RFCI implementation
-   - Handles data format conversion (numpy array → pandas DataFrame)
+1. **RFCI Module** (`src/rfci_module.py`)
+   - Complete Tetrad RFCI implementation using PyTetrad
+   - Robust JVM bootstrap and data type handling
+   - `run_rfci()` function with clean API
+
+2. **RFCI Wrapper Function** (`src/data/utils.py`)
+   - `run_rfci()` function that wraps the RFCI module
+   - Handles data format conversion (numpy array → RFCI input)
    - Returns binary adjacency matrix compatible with SEA pipeline
 
-2. **Edge Mapping** (`src/data/utils.py`)
+3. **Edge Mapping** (`src/data/utils.py`)
    - `edge_map_rfci_bin` maps binary adjacency to SEA's token space
    - `(1,0)` → forward edge, `(0,1)` → backward edge, `(1,1)` → ambiguous, `(0,0)` → no edge
 
-3. **Algorithm Registration** (`src/data/dataset.py`)
+4. **Algorithm Registration** (`src/data/dataset.py`)
    - Added RFCI to `get_run_alg()` function
    - RFCI is treated as observational algorithm (like FCI/GES)
 
-4. **CLI Support** (`src/args.py`)
+5. **CLI Support** (`src/args.py`)
    - Added `"rfci"` to algorithm choices
    - Can be selected via `--algorithm rfci`
 
-5. **Configuration** (`config/aggregator_tf_rfci.yaml`)
+6. **Configuration** (`config/aggregator_tf_rfci.yaml`)
    - Ready-to-use config file for RFCI experiments
    - Based on FCI config with appropriate settings
 
@@ -33,9 +38,9 @@ This guide explains how to use your Tetrad RFCI algorithm with the SEA pipeline.
    # Install py-tetrad or set TETRAD_JAR environment variable
    ```
 
-2. **Ensure your RFCI module is accessible**:
-   - Your `data_dcdi.py` file should be in the Python path
-   - Or modify the import in `src/data/utils.py` line 17
+2. **Ensure RFCI module is accessible**:
+   - The `rfci_module.py` file is located in `src/` directory
+   - No additional path configuration needed
 
 ## Usage
 
@@ -89,9 +94,9 @@ This will verify:
 
 ## Troubleshooting
 
-1. **Import Error**: If `data_dcdi` module not found:
-   - Ensure `data_dcdi.py` is in Python path
-   - Or modify import path in `src/data/utils.py`
+1. **Import Error**: If `rfci_module` not found:
+   - Ensure `rfci_module.py` is in `src/` directory
+   - Check that Python can import the module
 
 2. **JVM Issues**: If Tetrad JVM fails to start:
    - Install `py-tetrad` package
@@ -106,6 +111,7 @@ This will verify:
 
 ```
 sea-reproduce/
+├── src/rfci_module.py         # RFCI implementation
 ├── src/data/utils.py          # RFCI wrapper + edge mapping
 ├── src/data/dataset.py        # Algorithm selector
 ├── src/args.py                # CLI arguments

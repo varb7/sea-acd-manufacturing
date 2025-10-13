@@ -37,14 +37,14 @@ def test_rfci_wrapper():
             print(f"RFCI result type: {result.dtype}")
             print("RFCI adjacency matrix:")
             print(result)
-            print("✅ RFCI wrapper test passed!")
+            print("RFCI wrapper test passed!")
             return True
         else:
-            print("❌ RFCI returned None")
+            print("RFCI returned None")
             return False
             
     except Exception as e:
-        print(f"❌ RFCI wrapper test failed: {e}")
+        print(f"RFCI wrapper test failed: {e}")
         return False
 
 def test_algorithm_selector():
@@ -56,10 +56,10 @@ def test_algorithm_selector():
     try:
         rfci_func = get_run_alg("rfci")
         print(f"RFCI function: {rfci_func}")
-        print("✅ Algorithm selector test passed!")
+        print("Algorithm selector test passed!")
         return True
     except Exception as e:
-        print(f"❌ Algorithm selector test failed: {e}")
+        print(f"Algorithm selector test failed: {e}")
         return False
 
 def test_edge_mapping():
@@ -78,15 +78,15 @@ def test_edge_mapping():
         
         edge_attrs = convert_result_to_lg(G, edge_map_rfci_bin)
         print(f"Edge attributes: {edge_attrs}")
-        print("✅ Edge mapping test passed!")
+        print("Edge mapping test passed!")
         return True
     except Exception as e:
-        print(f"❌ Edge mapping test failed: {e}")
+        print(f"Edge mapping test failed: {e}")
         return False
 
 def main():
     """Run all tests."""
-    print("🧪 Testing RFCI integration with SEA pipeline\n")
+    print("Testing RFCI integration with SEA pipeline\n")
     
     tests = [
         test_rfci_wrapper,
@@ -102,13 +102,13 @@ def main():
             passed += 1
         print()
     
-    print(f"📊 Test Results: {passed}/{total} tests passed")
+    print(f"Test Results: {passed}/{total} tests passed")
     
     if passed == total:
-        print("🎉 All tests passed! RFCI integration is ready.")
+        print("All tests passed! RFCI integration is ready.")
         return 0
     else:
-        print("⚠️  Some tests failed. Check the output above.")
+        print("Some tests failed. Check the output above.")
         return 1
 
 if __name__ == "__main__":
