@@ -51,18 +51,18 @@ edge_map_gies = {
 }
 
 # Edge mapping for RFCI PAG format (compatible with FCI)
+# In sea-reproduce/src/data/utils.py
 edge_map_rfci_pag = {
-    # 0 reserved for padding
-    (0, 0): 1,  # no edge (unpadded)
-    (1, 1): 2,  # undirected edge (-)
-    (2, 0): 3,  # forward edge (->)
-    (0, 2): 4,  # backward edge (<-)
-    (4, 4): 5,  # ambiguous edge (<->)
-    (2, 2): 6,  # bidirectional
-    (4, 0): 7,  # partial forward
-    (0, 4): 8,  # partial backward
+    # 0-based indexing to match embedding layer
+    (0, 0): 0,  # no edge (unpadded)
+    (1, 1): 1,  # undirected edge (-)
+    (2, 0): 2,  # forward edge (->)
+    (0, 2): 3,  # backward edge (<-)
+    (4, 4): 4,  # ambiguous edge (<->)
+    (2, 2): 5,  # bidirectional
+    (4, 0): 6,  # partial forward
+    (0, 4): 7,  # partial backward
 }
-
 
 def convert_to_item(dataset, feats, graphs, orders):
     """
@@ -120,8 +120,8 @@ def convert_to_graphs(results, dataset):
             # G includes {-1, 0, 1} for GES and GRaSP
             graphs.append(convert_result_to_lg(G, edge_map_ges))
         elif dataset.algorithm == "rfci":
-            # RFCI now returns PAG format (0,1,2,3,4)
-            graphs.append(convert_result_to_lg(G, edge_map_rfci_pag))
+            # RFCI now returns FCI-compatible values {-1,0,1,2}; shift by +2
+            graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
         else:
             # GIES: G includes {0, 1}
             # to include padding, we should map this to {1, 2}

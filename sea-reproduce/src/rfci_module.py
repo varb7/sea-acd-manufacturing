@@ -134,15 +134,13 @@ class TetradRFCI:
 
     def _pag_to_adjacency_matrix(self, pag, columns: list) -> np.ndarray:
         """
-        Convert PAG to adjacency matrix with PAG edge types (like FCI).
-        
-        Returns:
-            np.ndarray: PAG adjacency matrix with values:
-            0 = no edge
-            1 = undirected edge (-)
-            2 = forward edge (->)
-            3 = backward edge (<-)
-            4 = ambiguous edge (<->)
+        Convert PAG to FCI-compatible adjacency with values {-1, 0, 1, 2}.
+
+        Encoding (to match FCI downstream processing):
+          -1 = backward edge (<-)
+           0 = no edge
+           1 = undirected edge (-)
+           2 = forward edge (->)
         """
         n = len(columns)
         adj = np.zeros((n, n), dtype=int)
@@ -157,7 +155,7 @@ class TetradRFCI:
                 e = pag.getEdge(na, nb)
                 if e is None:
                     continue
-                    
+
                 # Map endpoints relative to (na, nb)
                 if e.getNode1() == na:
                     ea = e.getEndpoint1()
@@ -165,27 +163,27 @@ class TetradRFCI:
                 else:
                     ea = e.getEndpoint2()
                     eb = e.getEndpoint1()
-                
-                # Convert PAG endpoints to PAG values
+
+                # Convert PAG endpoints to FCI-compatible values
                 if ea == Endpoint.TAIL and eb == Endpoint.ARROW:
-                    adj[i, j] = 2  # forward edge (->)
+                    # a -> b
+                    adj[i, j] = 2
                 elif ea == Endpoint.ARROW and eb == Endpoint.TAIL:
-                    adj[j, i] = 2  # backward edge (<-)
+                    # a <- b  (i.e., b -> a)
+                    adj[i, j] = -1
                 elif ea == Endpoint.TAIL and eb == Endpoint.TAIL:
-                    adj[i, j] = 1  # undirected edge (-)
-                    adj[j, i] = 1
+                    # a - b (undirected/skeleton)
+                    adj[i, j] = 1
                 elif ea == Endpoint.CIRCLE and eb == Endpoint.ARROW:
-                    adj[i, j] = 4  # ambiguous edge (<->)
+                    # a o-> b, treat as forward
+                    adj[i, j] = 2
                 elif ea == Endpoint.ARROW and eb == Endpoint.CIRCLE:
-                    adj[j, i] = 4  # ambiguous edge (<->)
+                    # a <-o b, treat as backward
+                    adj[i, j] = -1
                 elif ea == Endpoint.CIRCLE and eb == Endpoint.CIRCLE:
-                    adj[i, j] = 4  # ambiguous edge (<->)
-                    adj[j, i] = 4
-                elif ea == Endpoint.CIRCLE and eb == Endpoint.TAIL:
-                    adj[i, j] = 4  # ambiguous edge (<->)
-                elif ea == Endpoint.TAIL and eb == Endpoint.CIRCLE:
-                    adj[j, i] = 4  # ambiguous edge (<->)
-                    
+                    # a o-o b, treat as undirected
+                    adj[i, j] = 1
+
         return adj
 
     # ---------------- Public API ----------------
