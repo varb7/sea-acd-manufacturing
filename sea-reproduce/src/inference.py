@@ -62,20 +62,56 @@ def main():
                         **kwargs)
 
     best_path = args.checkpoint_path
+    printt(f"DEBUG: About to run prediction with checkpoint: {best_path}")
+    printt(f"DEBUG: Data module loaded: {data}")
+    printt(f"DEBUG: Model loaded: {model}")
+    
     if os.path.exists(best_path):
-        results = tester.predict(model, data, ckpt_path=best_path)
+        printt("DEBUG: Checkpoint exists, running prediction...")
+        try:
+            results = tester.predict(model, data, ckpt_path=best_path)
+            printt(f"DEBUG: Prediction completed. Results type: {type(results)}")
+            if results is None:
+                printt("ERROR: tester.predict() returned None!")
+            else:
+                printt(f"DEBUG: Results length: {len(list(results)) if results else 'None'}")
+        except Exception as e:
+            printt(f"ERROR during prediction: {e}")
+            import traceback
+            traceback.print_exc()
+            return
     # baselines only
     else:
         printt("Inference with NO checkpoint")
-        results = tester.predict(model, data)
+        try:
+            results = tester.predict(model, data)
+            printt(f"DEBUG: Baseline prediction completed. Results type: {type(results)}")
+        except Exception as e:
+            printt(f"ERROR during baseline prediction: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+    
+    printt("DEBUG: About to process results...")
+    if results is None:
+        printt("ERROR: Results is None, cannot process!")
+        return
+        
     # post-process results for dispatcher
     results_dict = defaultdict(list)
-    for batch in results:
-        for k, v in batch.items():
-            if type(v) is list:
-                results_dict[k].extend(v)
-            else:
-                results_dict[k].append(v)
+    try:
+        for batch in results:
+            printt(f"DEBUG: Processing batch: {type(batch)}")
+            for k, v in batch.items():
+                if type(v) is list:
+                    results_dict[k].extend(v)
+                else:
+                    results_dict[k].append(v)
+    except Exception as e:
+        printt(f"ERROR processing results: {e}")
+        import traceback
+        traceback.print_exc()
+        return
     # organize by data setting
     key_to_metrics = defaultdict(lambda: defaultdict(list))
     auc = results_dict["auroc"]

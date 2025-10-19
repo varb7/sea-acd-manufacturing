@@ -103,12 +103,17 @@ class InferenceDataModule(pl.LightningDataModule):
                 splits_to_load=["test"])
 
     def predict_dataloader(self):
+        print(f"DEBUG: Creating predict dataloader for algorithm: {self.args.algorithm}")
+        print(f"DEBUG: Data file: {self.data_file}")
+        print(f"DEBUG: Test dataset length: {len(self.subset_test)}")
+        
         test_loader = DataLoader(self.subset_test,
                                  batch_size=self.batch_size,
                                  num_workers=self.num_workers,
                                  shuffle=False,
                                  pin_memory=False,
                                  collate_fn=partial(collate, self.args))
+        print(f"DEBUG: DataLoader created with {len(test_loader)} batches")
         return test_loader
 
     def test_dataloader(self):

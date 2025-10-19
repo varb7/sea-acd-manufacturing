@@ -185,6 +185,30 @@ class Aggregator(pl.LightningModule):
                 self.log(f"Val/{k}", np.mean(v),
                     batch_size=len(output), sync_dist=True)
 
+    def predict_step(self, batch, batch_idx):
+        print(f"DEBUG: predict_step called with batch_idx: {batch_idx}")
+        print(f"DEBUG: batch keys: {batch.keys() if isinstance(batch, dict) else 'Not a dict'}")
+        
+        try:
+            output = self.encoder(batch)
+            print(f"DEBUG: Encoder output shape: {output.shape}")
+            
+            losses = self.compute_losses(output, batch)
+            print(f"DEBUG: Losses computed: {losses.keys()}")
+            
+            # metrics
+            results = self.compute_metrics_per_graph(output, batch,
+                    save_preds=False)
+            print(f"DEBUG: Metrics computed: {results.keys()}")
+            
+            return results
+            
+        except Exception as e:
+            print(f"ERROR in predict_step: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def configure_optimizers(self):
         param_groups = get_params_groups(self, self.args)
         optimizer = AdamW(param_groups)
