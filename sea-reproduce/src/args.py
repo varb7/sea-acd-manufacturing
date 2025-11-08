@@ -99,7 +99,7 @@ def get_parser():
     # ======== model =======
     parser.add_argument("--algorithm",
                         type=str, default="fci",
-                        choices=["fci", "rfci", "gies", "ges", "grasp"])
+                        choices=["fci", "rfci", "gies", "ges", "fges", "grasp", "cfci", "fcimax", "gfci"])
     parser.add_argument("--model",
                         type=str, default="aggregator")
     parser.add_argument("--n_heads",

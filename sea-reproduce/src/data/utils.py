@@ -1,6 +1,7 @@
 import os
 from contextlib import redirect_stdout
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,13 +13,37 @@ from causallearn.search.ScoreBased.GES import ges
 from causallearn.search.PermutationBased.GRaSP import grasp
 from gies import fit_bic
 import pandas as pd
-# Import RFCI module
+# Import Tetrad modules
 try:
     from rfci_module import run_rfci as tetrad_run_rfci
 except ImportError:
     # Fallback: if RFCI module is not found
     print("Warning: RFCI module not found. Please ensure rfci_module.py is accessible.")
     tetrad_run_rfci = None
+
+try:
+    from fges_module import run_fges as tetrad_run_fges
+except ImportError:
+    print("Warning: FGES module not found. Please ensure fges_module.py is accessible.")
+    tetrad_run_fges = None
+
+try:
+    from cfci_module import run_cfci as tetrad_run_cfci
+except ImportError:
+    print("Warning: CFCI module not found. Please ensure cfci_module.py is accessible.")
+    tetrad_run_cfci = None
+
+try:
+    from fcimax_module import run_fci_max as tetrad_run_fci_max
+except ImportError:
+    print("Warning: FCIMax module not found. Please ensure fcimax_module.py is accessible.")
+    tetrad_run_fci_max = None
+
+try:
+    from gfci_module import run_gfci as tetrad_run_gfci
+except ImportError:
+    print("Warning: GFCI module not found. Please ensure gfci_module.py is accessible.")
+    tetrad_run_gfci = None
 
 
 edge_map_fci = {
@@ -123,11 +148,11 @@ def convert_to_graphs(results, dataset):
             # G includes {-1, 0, 1, 2} for FCI
             # to include padding, we should map this to {1, 2, 3, 4}
             graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
-        elif dataset.algorithm in ["ges", "grasp"]:
-            # G includes {-1, 0, 1} for GES and GRaSP
+        elif dataset.algorithm in ["ges", "grasp", "fges"]:
+            # G includes {-1, 0, 1} for GES, GRaSP, and FGES
             graphs.append(convert_result_to_lg(G, edge_map_ges))
-        elif dataset.algorithm == "rfci":
-            # RFCI now returns FCI-compatible values {-1,0,1,2}; shift by +2
+        elif dataset.algorithm in ["rfci", "cfci", "fcimax", "gfci"]:
+            # PAG-based algorithms return FCI-compatible values {-1,0,1,2}; shift by +2
             graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
         else:
             # GIES: G includes {0, 1}
@@ -228,6 +253,196 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
         return adj.astype(int)
     except Exception as e:
         print(f"RFCI failed for batch: {e}")
+        return None
+
+
+def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False, 
+                     equivalent_sample_size=10.0, orient_cpdag_to_dag=True):
+    """
+    Tetrad FGES wrapper for SEA pipeline.
+    Returns GES-compatible format {-1, 0, 1} for use with edge_map_ges.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        penalty_discount: score complexity penalty
+        max_degree: limit degree per node (-1 = unlimited)
+        parallel: try to use multiple threads
+        equivalent_sample_size: for BDeu score on discrete data
+        orient_cpdag_to_dag: convert CPDAG to DAG
+    
+    Returns:
+        np.ndarray: adjacency matrix (k_vars, k_vars) with values {-1, 0, 1}
+    """
+    if tetrad_run_fges is None:
+        print("Warning: FGES module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        columns = [f"v{i}" for i in range(k)]
+        
+        adj = tetrad_run_fges(
+            batch,
+            columns=columns,
+            penalty_discount=penalty_discount,
+            max_degree=max_degree,
+            parallel=parallel,
+            equivalent_sample_size=equivalent_sample_size,
+            orient_cpdag_to_dag=orient_cpdag_to_dag
+        )
+        
+        return adj.astype(int)
+    except Exception as e:
+        print(f"FGES failed for batch: {e}")
+        return None
+
+
+def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True):
+    """
+    Tetrad CFCI wrapper for SEA pipeline.
+    Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        include_undirected: whether to include undirected edges
+    
+    Returns:
+        np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
+    """
+    if tetrad_run_cfci is None:
+        print("Warning: CFCI module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        columns = [f"v{i}" for i in range(k)]
+        
+        adj_binary = tetrad_run_cfci(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            include_undirected=include_undirected
+        )
+        
+        # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
+        adj_fci = np.zeros_like(adj_binary, dtype=int)
+        for i in range(k):
+            for j in range(k):
+                if i == j:
+                    continue
+                if adj_binary[i, j] == 1 and adj_binary[j, i] == 1:
+                    adj_fci[i, j] = 1  # undirected edge
+                elif adj_binary[i, j] == 1:
+                    adj_fci[i, j] = 2  # forward edge
+                elif adj_binary[j, i] == 1:
+                    adj_fci[i, j] = -1  # backward edge
+        
+        return adj_fci.astype(int)
+    except Exception as e:
+        print(f"CFCI failed for batch: {e}")
+        return None
+
+
+def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True):
+    """
+    Tetrad FCI-Max wrapper for SEA pipeline.
+    Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        include_undirected: whether to include undirected edges
+    
+    Returns:
+        np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
+    """
+    if tetrad_run_fci_max is None:
+        print("Warning: FCIMax module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        columns = [f"v{i}" for i in range(k)]
+        
+        adj_binary = tetrad_run_fci_max(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            include_undirected=include_undirected
+        )
+        
+        # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
+        adj_fci = np.zeros_like(adj_binary, dtype=int)
+        for i in range(k):
+            for j in range(k):
+                if i == j:
+                    continue
+                if adj_binary[i, j] == 1 and adj_binary[j, i] == 1:
+                    adj_fci[i, j] = 1  # undirected edge
+                elif adj_binary[i, j] == 1:
+                    adj_fci[i, j] = 2  # forward edge
+                elif adj_binary[j, i] == 1:
+                    adj_fci[i, j] = -1  # backward edge
+        
+        return adj_fci.astype(int)
+    except Exception as e:
+        print(f"FCI-Max failed for batch: {e}")
+        return None
+
+
+def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirected=True):
+    """
+    Tetrad GFCI wrapper for SEA pipeline.
+    Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        penalty_discount: score complexity penalty
+        include_undirected: whether to include undirected edges
+    
+    Returns:
+        np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
+    """
+    if tetrad_run_gfci is None:
+        print("Warning: GFCI module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        columns = [f"v{i}" for i in range(k)]
+        
+        adj_binary = tetrad_run_gfci(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            penalty_discount=penalty_discount,
+            include_undirected=include_undirected
+        )
+        
+        # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
+        adj_fci = np.zeros_like(adj_binary, dtype=int)
+        for i in range(k):
+            for j in range(k):
+                if i == j:
+                    continue
+                if adj_binary[i, j] == 1 and adj_binary[j, i] == 1:
+                    adj_fci[i, j] = 1  # undirected edge
+                elif adj_binary[i, j] == 1:
+                    adj_fci[i, j] = 2  # forward edge
+                elif adj_binary[j, i] == 1:
+                    adj_fci[i, j] = -1  # backward edge
+        
+        return adj_fci.astype(int)
+    except Exception as e:
+        print(f"GFCI failed for batch: {e}")
         return None
 
 
