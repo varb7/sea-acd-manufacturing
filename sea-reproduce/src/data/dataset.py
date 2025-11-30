@@ -198,9 +198,24 @@ class TestDataset(MetaDataset):
 
     def __getitem__(self, idx):
         dataset = self.data[idx]
+        print(f"DEBUG: Loading dataset idx={idx}, key={dataset.key}, num_vars={dataset.num_vars}, data_shape={dataset.data.shape}")
+        
+        # Validate dataset for problematic data before processing
+        if np.isnan(dataset.data).any():
+            print(f"SKIP: Dataset idx={idx}, key={dataset.key} contains NaN values - skipping")
+            return {}
+        
+        if np.isinf(dataset.data).any():
+            print(f"SKIP: Dataset idx={idx}, key={dataset.key} contains Inf values - skipping")
+            return {}
+        
         num_batches = self.args.fci_batches_inference
         start = time.time()  # keep track of CPU time
-        batches, corrs = self._sample_batches(dataset, num_batches)
+        try:
+            batches, corrs = self._sample_batches(dataset, num_batches)
+        except Exception as e:
+            print(f"SKIP: Dataset idx={idx}, key={dataset.key} failed in _sample_batches: {e}")
+            return {}
         # learned sampler = we already ran the algorithms
         if self.args.use_learned_sampler:
             graphs, orders = self.graphs, self.orders

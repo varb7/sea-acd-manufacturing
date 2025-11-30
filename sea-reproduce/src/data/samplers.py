@@ -324,11 +324,18 @@ def compute_features(x):
     x: (num_vars, num_samples)
     """
     if x.shape[0] < 100:
-        return np.linalg.pinv(np.cov(x), rcond=1e-10)
-    lw = LedoitWolf()
-    lw.fit(x.T)
-    invcovs = lw.get_precision()
-    return invcovs
+        try:
+            return np.linalg.pinv(np.cov(x), rcond=1e-10)
+        except np.linalg.LinAlgError as e:
+            print(f"WARNING: SVD failed in compute_features: {e}")
+            # Fallback to Ledoit-Wolf
+            lw = LedoitWolf()
+            lw.fit(x.T)
+            return lw.get_precision()
+    else:
+        lw = LedoitWolf()
+        lw.fit(x.T)
+        return lw.get_precision()
 
 
 def cartesian_prod(arrays):

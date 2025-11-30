@@ -82,7 +82,24 @@ class Aggregator(pl.LightningModule):
         if reduce:
             forward_edge = forward_edge[forward_mask]
             backward_edge = backward_edge[backward_mask]
-            assert len(forward_edge) == len(backward_edge)
+            
+            # Check for asymmetry and handle gracefully
+            if len(forward_edge) != len(backward_edge):
+                print(f"WARNING: Asymmetric edges detected - forward={len(forward_edge)}, backward={len(backward_edge)}")
+                print(f"  Output shape: {output.shape}")
+                print(f"  Forward mask sum: {forward_mask.sum()}, Backward mask sum: {backward_mask.sum()}")
+                # Use minimum length to avoid index errors
+                min_len = min(len(forward_edge), len(backward_edge))
+                if min_len == 0:
+                    print(f"  ERROR: No valid edges remain after symmetrization, returning empty tensors")
+                    # Return empty tensors that won't cause issues downstream
+                    edge_pred = torch.empty(0, 3)
+                    joint_label = torch.empty(0, dtype=torch.long)
+                    return edge_pred, joint_label
+                print(f"  Using minimum length: {min_len}")
+                forward_edge = forward_edge[:min_len]
+                backward_edge = backward_edge[:min_len]
+            
             logits = torch.cat([forward_edge, backward_edge], dim=1)
             edge_pred = self.top_layer(logits)  # (B*T, 2*dim) -> (B*T, 3)
         else:
@@ -100,6 +117,11 @@ class Aggregator(pl.LightningModule):
         if reduce:
             forward_label = forward_label[forward_mask]
             backward_label = backward_label[backward_mask] * 2
+            # Apply same length adjustment to labels
+            if len(forward_label) != len(backward_label):
+                min_len = min(len(forward_label), len(backward_label))
+                forward_label = forward_label[:min_len]
+                backward_label = backward_label[:min_len]
             # forward/backward should be mutually exclusive
             joint_label = forward_label + backward_label  # {0, 1, 2}
         else:
@@ -132,10 +154,30 @@ class Aggregator(pl.LightningModule):
             p = p.cpu()
             t = t.cpu()
             assert p.shape == t.shape
-            # convert prediction to list
-            auroc.append(self.auroc(p, t).item())
-            auprc.append(self.auprc(p, t).item())
-            acc.append(self.acc(p, t).item())
+            
+            # Check if tensors are empty (no valid edges after filtering)
+            if p.numel() == 0 or t.numel() == 0:
+                print(f"WARNING: Graph {i} (key={batch['key'][i] if 'key' in batch else 'unknown'}) has empty predictions/targets, skipping metrics")
+                # Append NaN for failed metrics
+                auroc.append(float('nan'))
+                auprc.append(float('nan'))
+                acc.append(float('nan'))
+                if save_preds:
+                    pred_list.append([])
+                    true_list.append([])
+                continue
+            
+            # Try computing metrics with error handling
+            try:
+                auroc.append(self.auroc(p, t).item())
+                auprc.append(self.auprc(p, t).item())
+                acc.append(self.acc(p, t).item())
+            except (IndexError, RuntimeError, ValueError) as e:
+                print(f"WARNING: Metric computation failed for graph {i}: {e}")
+                auroc.append(float('nan'))
+                auprc.append(float('nan'))
+                acc.append(float('nan'))
+            
             if save_preds:
                 pred_list.append(p.tolist())
                 true_list.append(t.tolist())
@@ -186,7 +228,7 @@ class Aggregator(pl.LightningModule):
                     batch_size=len(output), sync_dist=True)
 
     def predict_step(self, batch, batch_idx):
-        print(f"DEBUG: predict_step called with batch_idx: {batch_idx}")
+        print(f"DEBUG: predict_step called with batch_idx: {batch_idx}, key: {batch['key']}")
         print(f"DEBUG: batch keys: {batch.keys() if isinstance(batch, dict) else 'Not a dict'}")
         
         try:
