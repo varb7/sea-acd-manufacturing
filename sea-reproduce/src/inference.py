@@ -102,6 +102,10 @@ def main():
     try:
         for batch in results:
             printt(f"DEBUG: Processing batch: {type(batch)}")
+            # Skip None batches (from skipped datasets)
+            if batch is None:
+                printt("DEBUG: Skipping None batch (dataset was skipped)")
+                continue
             for k, v in batch.items():
                 if type(v) is list:
                     results_dict[k].extend(v)

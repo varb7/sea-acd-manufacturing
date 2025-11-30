@@ -454,8 +454,18 @@ def collate(args, batch):
     # and skip invalid items haha
     keys = ["label", "input", "key", "index", "feats", "unique", "time"]
     batch = {key:[item[key] for item in batch if key in item] for key in keys}
+    
+    # Check if batch is empty (all datasets were skipped)
+    if all(len(val) == 0 for val in batch.values()):
+        print("WARNING: Entire batch is empty (all datasets skipped), returning None")
+        return None
+    
     new_batch = {}
     for key, val in batch.items():
+        # Skip empty values (happens when datasets are skipped)
+        if len(val) == 0:
+            continue
+            
         if not torch.is_tensor(val[0]) or val[0].ndim == 0:
             new_batch[key] = default_collate(val)
         # don't collate this; adjust based on train/val

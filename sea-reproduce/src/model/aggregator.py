@@ -228,6 +228,11 @@ class Aggregator(pl.LightningModule):
                     batch_size=len(output), sync_dist=True)
 
     def predict_step(self, batch, batch_idx):
+        # Handle empty batches (all datasets skipped)
+        if batch is None:
+            print(f"DEBUG: Batch {batch_idx} is None (all datasets skipped)")
+            return None
+            
         print(f"DEBUG: predict_step called with batch_idx: {batch_idx}, key: {batch['key']}")
         print(f"DEBUG: batch keys: {batch.keys() if isinstance(batch, dict) else 'Not a dict'}")
         
