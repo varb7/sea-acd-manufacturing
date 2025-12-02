@@ -21,7 +21,17 @@ import torch
 from torch.utils.data import Dataset
 
 from . import samplers
-from .utils import run_fci, run_ges, run_gies, run_grasp, run_rfci
+from .utils import (
+    run_fci,
+    run_ges,
+    run_gies,
+    run_grasp,
+    run_rfci,
+    run_fges_tetrad,
+    run_cfci,
+    run_fci_max,
+    run_gfci,
+)
 from .utils import convert_to_graphs, convert_to_item
 from utils import read_csv
 
@@ -182,7 +192,7 @@ class TrainDataset(MetaDataset):
         num_batches = np.random.randint(self.args.fci_batches,
                                         self.args.fci_batches * 5, 1).item()
         batches, corrs = self._sample_batches(dataset, num_batches)
-        results = self.run_alg(batches)
+        results = self.run_alg(batches, dataset=dataset)
         graphs, orders = convert_to_graphs(results, dataset)
         if graphs is None:
             return {}
@@ -220,7 +230,7 @@ class TestDataset(MetaDataset):
         if self.args.use_learned_sampler:
             graphs, orders = self.graphs, self.orders
         else:
-            results = self.run_alg(batches)
+            results = self.run_alg(batches, dataset=dataset)
             graphs, orders = convert_to_graphs(results, dataset)
         end = time.time()  # keep track of CPU time
         dataset.time = end - start
@@ -277,13 +287,74 @@ class MetaObservationalDataset(MetaDataset):
         self.sampler_classes = get_samplers(is_obs=True,
                                     is_learned=self.args.use_learned_sampler)
 
-    def run_alg(self, batches):
+    def run_alg(self, batches, dataset=None):
         """
         batches: tuples (batch, order) output of sample_batches
+        dataset: Optional dataset object to extract prior knowledge from
         """
         results = []
+        
+        dataset_name = getattr(dataset, 'key', 'unknown')
+        prior_enabled = getattr(self.args, 'use_prior_knowledge', True)
+        prior = None
+        columns = None
+        prior_message_printed = False
+
+        # Extract prior knowledge from dataset metadata if available
+        if dataset is not None and prior_enabled:
+            if hasattr(dataset, 'metadata') and dataset.metadata is not None:
+                try:
+                    from utils.tetrad_prior_knowledge import (
+                        format_prior_knowledge_for_algorithm,
+                        log_prior_knowledge_summary,
+                    )
+                    prior = format_prior_knowledge_for_algorithm(dataset.metadata, self.args.algorithm)
+                    if prior:
+                        prior_message_printed = True
+                        try:
+                            print(f"[PRIOR] Using prior knowledge for dataset '{dataset_name}' with algorithm '{self.args.algorithm}'.")
+                            log_prior_knowledge_summary(prior, dataset_name=dataset_name)
+                        except Exception as log_exc:
+                            print(f"[PRIOR] Could not log prior knowledge summary for '{dataset_name}': {log_exc}")
+                    else:
+                        print(f"[PRIOR] Dataset '{dataset_name}' metadata yielded no constraints.")
+                        prior_message_printed = True
+                except Exception as e:
+                    print(f"Warning: Could not extract prior knowledge for dataset '{dataset_name}': {e}")
+            
+            # Get variable names from dataset if available
+            if hasattr(dataset, 'variable_names') and dataset.variable_names:
+                columns = dataset.variable_names
+        elif not prior_message_printed:
+            if not prior_enabled:
+                print(f"[PRIOR] Prior knowledge disabled via arguments; running dataset '{dataset_name}' unconstrained.")
+            else:
+                print(f"[PRIOR] Dataset '{dataset_name}' missing metadata; running unconstrained.")
+        
         for batch, order in batches:
-            G = self._run_alg(batch)
+            # For Tetrad algorithms, pass prior knowledge and columns
+            if self.args.algorithm in ["fges", "cfci", "fcimax", "gfci", "rfci"]:
+                # Use actual variable names if available, otherwise use v0, v1, etc.
+                if columns is None:
+                    k = batch.shape[1]
+                    columns = [f"v{i}" for i in range(k)]
+                
+                # Check if wrapper function accepts prior and columns
+                try:
+                    import inspect
+                    sig = inspect.signature(self._run_alg)
+                    if 'prior' in sig.parameters and 'columns' in sig.parameters:
+                        G = self._run_alg(batch, prior=prior, columns=columns)
+                    elif 'prior' in sig.parameters:
+                        G = self._run_alg(batch, prior=prior)
+                    else:
+                        G = self._run_alg(batch)
+                except:
+                    # Fallback: try with prior if it's a Tetrad algorithm
+                    G = self._run_alg(batch, prior=prior) if prior is not None else self._run_alg(batch)
+            else:
+                G = self._run_alg(batch)
+            
             if G is None:
                 continue
             order = torch.from_numpy(order).long()
@@ -339,12 +410,20 @@ def get_run_alg(algorithm):
         return run_fci
     elif algorithm == "rfci":
         return run_rfci
+    elif algorithm == "cfci":
+        return run_cfci
     elif algorithm == "ges":
         return run_ges
+    elif algorithm == "fges":
+        return run_fges_tetrad
     elif algorithm == "grasp":
         return run_grasp
     elif algorithm == "gies":
         return run_gies
+    elif algorithm == "fcimax":
+        return run_fci_max
+    elif algorithm == "gfci":
+        return run_gfci
     else:
         raise Exception("Unsupported algorithm", algorithm)
 

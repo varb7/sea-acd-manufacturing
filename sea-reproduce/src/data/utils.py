@@ -257,7 +257,7 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
 
 
 def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False, 
-                     equivalent_sample_size=10.0, orient_cpdag_to_dag=True):
+                     equivalent_sample_size=10.0, orient_cpdag_to_dag=True, prior=None, columns=None):
     """
     Tetrad FGES wrapper for SEA pipeline.
     Returns GES-compatible format {-1, 0, 1} for use with edge_map_ges.
@@ -269,6 +269,8 @@ def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False,
         parallel: try to use multiple threads
         equivalent_sample_size: for BDeu score on discrete data
         orient_cpdag_to_dag: convert CPDAG to DAG
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
     
     Returns:
         np.ndarray: adjacency matrix (k_vars, k_vars) with values {-1, 0, 1}
@@ -279,7 +281,8 @@ def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False,
     
     try:
         k = batch.shape[1]
-        columns = [f"v{i}" for i in range(k)]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
         
         adj = tetrad_run_fges(
             batch,
@@ -288,7 +291,8 @@ def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False,
             max_degree=max_degree,
             parallel=parallel,
             equivalent_sample_size=equivalent_sample_size,
-            orient_cpdag_to_dag=orient_cpdag_to_dag
+            orient_cpdag_to_dag=orient_cpdag_to_dag,
+            prior=prior
         )
         
         return adj.astype(int)
@@ -297,7 +301,7 @@ def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False,
         return None
 
 
-def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True):
+def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, columns=None):
     """
     Tetrad CFCI wrapper for SEA pipeline.
     Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
@@ -307,6 +311,8 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True):
         alpha: significance level for independence tests
         depth: max conditioning set size (-1 = unlimited)
         include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
     
     Returns:
         np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
@@ -317,14 +323,16 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True):
     
     try:
         k = batch.shape[1]
-        columns = [f"v{i}" for i in range(k)]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
         
         adj_binary = tetrad_run_cfci(
             batch,
             columns=columns,
             alpha=alpha,
             depth=depth,
-            include_undirected=include_undirected
+            include_undirected=include_undirected,
+            prior=prior
         )
         
         # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
@@ -346,7 +354,7 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True):
         return None
 
 
-def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True):
+def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, columns=None):
     """
     Tetrad FCI-Max wrapper for SEA pipeline.
     Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
@@ -356,6 +364,8 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True):
         alpha: significance level for independence tests
         depth: max conditioning set size (-1 = unlimited)
         include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
     
     Returns:
         np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
@@ -366,14 +376,16 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True):
     
     try:
         k = batch.shape[1]
-        columns = [f"v{i}" for i in range(k)]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
         
         adj_binary = tetrad_run_fci_max(
             batch,
             columns=columns,
             alpha=alpha,
             depth=depth,
-            include_undirected=include_undirected
+            include_undirected=include_undirected,
+            prior=prior
         )
         
         # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
@@ -395,7 +407,7 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True):
         return None
 
 
-def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirected=True):
+def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirected=True, prior=None, columns=None):
     """
     Tetrad GFCI wrapper for SEA pipeline.
     Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
@@ -406,6 +418,8 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
         depth: max conditioning set size (-1 = unlimited)
         penalty_discount: score complexity penalty
         include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
     
     Returns:
         np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
@@ -416,7 +430,8 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
     
     try:
         k = batch.shape[1]
-        columns = [f"v{i}" for i in range(k)]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
         
         adj_binary = tetrad_run_gfci(
             batch,
@@ -424,7 +439,8 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
             alpha=alpha,
             depth=depth,
             penalty_discount=penalty_discount,
-            include_undirected=include_undirected
+            include_undirected=include_undirected,
+            prior=prior
         )
         
         # Convert binary (0/1) to FCI format {-1, 0, 1, 2}

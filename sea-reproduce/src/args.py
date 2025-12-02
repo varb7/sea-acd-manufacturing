@@ -96,6 +96,16 @@ def get_parser():
                         action="store_true",
                         help="dispatcher mode")
 
+    # ======== prior knowledge ========
+    parser.add_argument("--use_prior_knowledge",
+                        action="store_true",
+                        default=True,
+                        help="Use prior knowledge from metadata if available (default: True)")
+    parser.add_argument("--no-use_prior_knowledge",
+                        dest="use_prior_knowledge",
+                        action="store_false",
+                        help="Disable prior knowledge from metadata")
+    
     # ======== model =======
     parser.add_argument("--algorithm",
                         type=str, default="fci",
