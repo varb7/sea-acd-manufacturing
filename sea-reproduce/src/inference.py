@@ -120,15 +120,32 @@ def main():
     key_to_metrics = defaultdict(lambda: defaultdict(list))
     auc = results_dict["auroc"]
     prc = results_dict["auprc"]
-    time = results_dict["time"]
+    time_list = results_dict["time"]
     true = results_dict["true"]
     pred = results_dict["pred"]
-    for i, key in enumerate(results_dict["key"]):
-        key_to_metrics[key]["auc"].append(auc[i])
-        key_to_metrics[key]["prc"].append(prc[i])
-        key_to_metrics[key]["time"].append(time[i])
-        key_to_metrics[key]["true"].append(true[i])
-        key_to_metrics[key]["pred"].append(pred[i])
+    keys = results_dict["key"]
+    
+    # Validate list lengths match
+    n_keys = len(keys)
+    if n_keys == 0:
+        printt("WARNING: No valid results to process (all datasets may have been skipped)")
+        save_pickle(args.results_file, {})
+        printt("All done. Exiting.")
+        return
+    
+    printt(f"DEBUG: Processing {n_keys} results. List lengths: auc={len(auc)}, prc={len(prc)}, time={len(time_list)}, true={len(true)}, pred={len(pred)}")
+    
+    for i, key in enumerate(keys):
+        if i < len(auc):
+            key_to_metrics[key]["auc"].append(auc[i])
+        if i < len(prc):
+            key_to_metrics[key]["prc"].append(prc[i])
+        if i < len(time_list):
+            key_to_metrics[key]["time"].append(time_list[i])
+        if i < len(true):
+            key_to_metrics[key]["true"].append(true[i])
+        if i < len(pred):
+            key_to_metrics[key]["pred"].append(pred[i])
     key_to_metrics = dict(key_to_metrics)
     save_pickle(args.results_file, key_to_metrics)
     printt("All done. Exiting.")
