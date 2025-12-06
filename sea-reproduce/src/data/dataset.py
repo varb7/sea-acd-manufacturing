@@ -406,17 +406,31 @@ class MetaObservationalDataset(MetaDataset):
         for batch, order in batches:
             # For Tetrad algorithms, pass prior knowledge and columns
             if self.args.algorithm in ["fges", "cfci", "fcimax", "gfci", "rfci"]:
-                # Use actual variable names if available, otherwise use v0, v1, etc.
-                if columns is None:
-                    k = batch.shape[1]
-                    columns = [f"v{i}" for i in range(k)]
+                # Get column names for the SAMPLED variables in this batch
+                # 'order' contains indices of which variables were sampled
+                k = batch.shape[1]
+                order_list = list(order) if hasattr(order, '__iter__') else [order]
+                
+                # Select column names for sampled variables only
+                batch_columns = None
+                if columns is not None and len(order_list) > 0:
+                    try:
+                        max_idx = max(order_list)
+                        if len(columns) > max_idx:
+                            batch_columns = [columns[i] for i in order_list]
+                    except (ValueError, IndexError):
+                        pass
+                
+                # Fallback: generate generic column names matching batch size
+                if batch_columns is None or len(batch_columns) != k:
+                    batch_columns = [f"v{i}" for i in range(k)]
                 
                 # Check if wrapper function accepts prior and columns
                 try:
                     import inspect
                     sig = inspect.signature(self._run_alg)
                     if 'prior' in sig.parameters and 'columns' in sig.parameters:
-                        G = self._run_alg(batch, prior=prior, columns=columns)
+                        G = self._run_alg(batch, prior=prior, columns=batch_columns)
                     elif 'prior' in sig.parameters:
                         G = self._run_alg(batch, prior=prior)
                     else:
