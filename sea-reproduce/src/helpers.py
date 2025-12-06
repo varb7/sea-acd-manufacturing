@@ -1,20 +1,10 @@
-# Utils package for tetrad prior knowledge utilities
 import os
 import sys
 import csv
 import pickle
+
 from datetime import datetime
 
-from .tetrad_prior_knowledge import (
-    PriorKnowledgeFormatter,
-    build_tetrad_knowledge,
-    format_prior_knowledge_for_algorithm,
-    validate_prior_knowledge,
-    log_prior_knowledge_summary,
-)
-
-
-# -------- Utility functions (originally from utils.py) --------
 
 def save_pickle(fp, data):
     with open(fp, "wb+") as f:
@@ -36,6 +26,7 @@ def read_csv(fp, fieldnames=None, delimiter=',', str_keys=[]):
             data.append(item)
     return data
 
+# -------- general
 
 def get_timestamp():
     return datetime.now().strftime('%H:%M:%S')
@@ -50,22 +41,3 @@ def get_suffix(metric):
     suffix = suffix + "{global_step}_{epoch}_{"
     suffix = suffix + metric + ":.3f}_{val_loss:.3f}"
     return suffix
-
-
-__all__ = [
-    # Tetrad prior knowledge utilities
-    'PriorKnowledgeFormatter',
-    'build_tetrad_knowledge',
-    'format_prior_knowledge_for_algorithm',
-    'validate_prior_knowledge',
-    'log_prior_knowledge_summary',
-    # General utilities
-    'save_pickle',
-    'read_pickle',
-    'read_csv',
-    'get_timestamp',
-    'printt',
-    'get_suffix',
-]
-
-

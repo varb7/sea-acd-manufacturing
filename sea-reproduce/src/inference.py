@@ -14,7 +14,7 @@ import pytorch_lightning as pl
 from args import parse_args
 from data import InferenceDataModule, BaselineDataModule
 from model import load_model
-from utils import printt, get_suffix, save_pickle
+from helpers import printt, get_suffix, save_pickle
 
 
 # TODO why not?

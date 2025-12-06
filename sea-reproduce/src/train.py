@@ -19,7 +19,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from args import parse_args
 from data import DataModule
 from model import load_model
-from utils import printt, get_suffix, save_pickle
+from helpers import printt, get_suffix, save_pickle
 
 
 # TODO why not?
