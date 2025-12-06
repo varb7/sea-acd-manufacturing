@@ -216,7 +216,8 @@ def run_gies(batch, regime):
     return graph.astype(int)
 
 
-def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial=False):
+def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial=False,
+              prior=None, columns=None):
     """
     Tetrad RFCI wrapper for SEA pipeline.
     
@@ -226,6 +227,8 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
         depth: max conditioning set size (-1 = unlimited)
         include_undirected: whether to include undirected edges
         count_partial: whether to count partial orientations
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
     
     Returns:
         np.ndarray: binary adjacency matrix (k_vars, k_vars) with dtype=int
@@ -236,8 +239,9 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
     
     try:
         k = batch.shape[1]
-        # Create column names for the variables
-        columns = [f"v{i}" for i in range(k)]
+        # Create column names for the variables if not provided
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
         
         # Call the RFCI function with numpy array and column names
         adj = tetrad_run_rfci(
@@ -246,7 +250,8 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
             alpha=alpha,
             depth=depth,
             include_undirected=include_undirected,
-            count_partial=count_partial
+            count_partial=count_partial,
+            prior=prior
         )
         
         # Ensure int np.ndarray

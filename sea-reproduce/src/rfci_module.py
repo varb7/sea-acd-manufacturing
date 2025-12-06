@@ -125,9 +125,11 @@ class TetradRFCI:
         else:
             return self.test.IndTestFisherZ(tetrad_data, self.alpha)
 
-    def _run_rfci(self, indep_test):
+    def _run_rfci(self, indep_test, knowledge=None):
         rfci = self.search.Rfci(indep_test)
         rfci.setDepth(self.depth)
+        if knowledge is not None:
+            rfci.setKnowledge(knowledge)
         return rfci.search()
 
     # ---------------- PAG → adjacency (directed) ----------------
@@ -188,8 +190,21 @@ class TetradRFCI:
 
     # ---------------- Public API ----------------
 
-    def run(self, data: Union[pd.DataFrame, np.ndarray], columns: Optional[list] = None) -> np.ndarray:
-        """Run RFCI and return a directed adjacency (parents → children) from the PAG."""
+    def run(self, data: Union[pd.DataFrame, np.ndarray], columns: Optional[list] = None,
+            prior: Optional[Dict[str, Any]] = None) -> np.ndarray:
+        """Run RFCI and return a directed adjacency (parents → children) from the PAG.
+        
+        Args:
+            data: Input data as DataFrame or numpy array
+            columns: Column names (required if data is numpy array)
+            prior: Optional prior knowledge dictionary with keys:
+                - "forbidden_edges": List of (source, target) tuples
+                - "required_edges": List of (source, target) tuples
+                - "tier_ordering": List of tiers, each tier is a list of node names
+        
+        Returns:
+            Adjacency matrix with FCI-compatible values {-1, 0, 1, 2}
+        """
         if isinstance(data, np.ndarray):
             if columns is None:
                 raise ValueError("Column names must be provided when input is a numpy array.")
@@ -201,9 +216,22 @@ class TetradRFCI:
         if df.empty:
             raise ValueError("Input data cannot be empty.")
 
+        # Build knowledge object if prior knowledge provided
+        knowledge = None
+        if prior is not None:
+            try:
+                from utils.tetrad_prior_knowledge import build_tetrad_knowledge
+                knowledge = build_tetrad_knowledge(prior, columns)
+                if knowledge is not None:
+                    print(f"[RFCI] Applied prior knowledge with {len(prior.get('forbidden_edges', []))} forbidden edges, "
+                          f"{len(prior.get('tier_ordering', []))} tiers")
+            except Exception as e:
+                print(f"[RFCI] Warning: Could not build knowledge object: {e}")
+                knowledge = None
+
         tetrad_data, cats, cont = self._convert_to_tetrad_format(df)
         indep = self._create_independence_test(tetrad_data, cats, cont)
-        pag = self._run_rfci(indep)
+        pag = self._run_rfci(indep, knowledge)
         return self._pag_to_adjacency_matrix(pag, columns)
 
     def get_parameters(self) -> Dict[str, Any]:
@@ -231,6 +259,7 @@ def run_rfci(
     depth: int = -1,
     count_partial: bool = False,
     include_undirected: bool = True,
+    prior: Optional[Dict[str, Any]] = None,
 ) -> np.ndarray:
     """
     Convenience function to run RFCI algorithm.
@@ -242,12 +271,16 @@ def run_rfci(
         depth: Maximum conditioning set size (-1 for unlimited)
         count_partial: Whether to count partial orientations as directed
         include_undirected: Whether to include undirected edges
+        prior: Optional prior knowledge dictionary with keys:
+            - "forbidden_edges": List of (source, target) tuples
+            - "required_edges": List of (source, target) tuples  
+            - "tier_ordering": List of tiers, each tier is a list of node names
         
     Returns:
-        Binary adjacency matrix (n_vars, n_vars) with dtype=int
+        Adjacency matrix (n_vars, n_vars) with FCI-compatible values {-1, 0, 1, 2}
     """
     rfci = TetradRFCI(alpha=alpha, depth=depth, count_partial=count_partial, include_undirected=include_undirected)
-    return rfci.run(data, columns)
+    return rfci.run(data, columns, prior=prior)
 
 
 # -------------- Quick sanity demo --------------

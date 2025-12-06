@@ -11,6 +11,8 @@ Dataset objects
 
 import os
 import time
+import pickle
+import glob
 from collections import defaultdict
 from contextlib import redirect_stdout
 
@@ -91,7 +93,7 @@ class InterventionalDataset(Dataset):
 
 
 class ObservationalDataset(Dataset):
-    def __init__(self, fp_data, fp_graph, algorithm):
+    def __init__(self, fp_data, fp_graph, algorithm, fp_metadata=None):
         super().__init__()
         # read raw data
         self.key = fp_graph.split("/")[-2]
@@ -101,6 +103,73 @@ class ObservationalDataset(Dataset):
         self.num_edges = self.graph.sum()
         self.algorithm = algorithm
         self.time = 0
+        
+        # Load metadata for prior knowledge
+        self.metadata = None
+        self.variable_names = None
+        self._load_metadata(fp_data, fp_metadata)
+    
+    def _load_metadata(self, fp_data, fp_metadata=None):
+        """
+        Load metadata from file. Tries multiple strategies:
+        1. Explicit fp_metadata path if provided
+        2. Auto-discover: look for *_meta.pkl in same directory as data
+        3. Auto-discover: look for metadata.pkl in same directory as data
+        """
+        metadata_path = None
+        
+        # Strategy 1: Explicit path
+        if fp_metadata and os.path.exists(fp_metadata):
+            metadata_path = fp_metadata
+        else:
+            # Strategy 2 & 3: Auto-discover in data directory
+            data_dir = os.path.dirname(fp_data)
+            if data_dir:
+                # Look for *_meta.pkl files
+                meta_patterns = [
+                    os.path.join(data_dir, "*_meta.pkl"),
+                    os.path.join(data_dir, "metadata.pkl"),
+                    os.path.join(data_dir, "meta.pkl"),
+                ]
+                for pattern in meta_patterns:
+                    matches = glob.glob(pattern)
+                    if matches:
+                        metadata_path = matches[0]
+                        break
+                
+                # Also try replacing data file extension with _meta.pkl
+                if not metadata_path:
+                    base_name = os.path.splitext(os.path.basename(fp_data))[0]
+                    potential_meta = os.path.join(data_dir, f"{base_name}_meta.pkl")
+                    if os.path.exists(potential_meta):
+                        metadata_path = potential_meta
+        
+        # Load metadata if found
+        if metadata_path and os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'rb') as f:
+                    self.metadata = pickle.load(f)
+                print(f"[METADATA] Loaded metadata from: {metadata_path}")
+                
+                # Extract variable names if available
+                if isinstance(self.metadata, dict):
+                    # Try common keys for variable names
+                    for key in ['variable_names', 'variables', 'columns', 'node_names', 'temporal_order']:
+                        if key in self.metadata:
+                            names = self.metadata[key]
+                            if isinstance(names, (list, tuple)) and len(names) == self.num_vars:
+                                self.variable_names = list(names)
+                                print(f"[METADATA] Found {len(self.variable_names)} variable names")
+                                break
+                            elif isinstance(names, (list, tuple)) and len(names) > 0:
+                                # temporal_order might have all names even if subsetted
+                                self.variable_names = list(names)[:self.num_vars] if len(names) >= self.num_vars else None
+                                if self.variable_names:
+                                    print(f"[METADATA] Using first {len(self.variable_names)} variable names from '{key}'")
+                                    break
+            except Exception as e:
+                print(f"[METADATA] Warning: Could not load metadata from {metadata_path}: {e}")
+                self.metadata = None
 
     def __len__(self):
         return len(self.data)
@@ -136,9 +205,12 @@ class MetaDataset(Dataset):
                                                        item["fp_regime"],
                                                        args.algorithm))
             else:
+                # Get metadata path from CSV if available, otherwise None (auto-discover)
+                fp_metadata = item.get("fp_metadata", None)
                 self.data.append(ObservationalDataset(item["fp_data"],
                                                       item["fp_graph"],
-                                                      args.algorithm))
+                                                      args.algorithm,
+                                                      fp_metadata=fp_metadata))
             if args.debug and len(self.data) > 100:
                 break
         # initialize per-class
