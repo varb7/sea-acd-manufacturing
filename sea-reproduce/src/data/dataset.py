@@ -431,12 +431,24 @@ class MetaObservationalDataset(MetaDataset):
                 try:
                     import inspect
                     sig = inspect.signature(self._run_alg)
+                    # For PC/CPC, use PAG format for FCI aggregator compatibility
+                    output_format = "pag" if self.args.algorithm in ["pc", "cpc"] else None
+                    
                     if 'prior' in sig.parameters and 'columns' in sig.parameters:
-                        G = self._run_alg(batch, prior=prior, columns=batch_columns)
+                        if output_format and 'output_format' in sig.parameters:
+                            G = self._run_alg(batch, prior=prior, columns=batch_columns, output_format=output_format)
+                        else:
+                            G = self._run_alg(batch, prior=prior, columns=batch_columns)
                     elif 'prior' in sig.parameters:
-                        G = self._run_alg(batch, prior=prior)
+                        if output_format and 'output_format' in sig.parameters:
+                            G = self._run_alg(batch, prior=prior, output_format=output_format)
+                        else:
+                            G = self._run_alg(batch, prior=prior)
                     else:
-                        G = self._run_alg(batch)
+                        if output_format and 'output_format' in sig.parameters:
+                            G = self._run_alg(batch, output_format=output_format)
+                        else:
+                            G = self._run_alg(batch)
                 except:
                     # Fallback: try with prior if it's a Tetrad algorithm
                     G = self._run_alg(batch, prior=prior) if prior is not None else self._run_alg(batch)

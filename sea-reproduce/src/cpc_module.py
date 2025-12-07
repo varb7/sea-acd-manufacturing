@@ -168,20 +168,115 @@ class TetradCPC:
 
         return adj
 
+    def _cpdag_to_adjacency_pag(self, cpdag, columns: list) -> np.ndarray:
+        """
+        Convert CPDAG to FCI-compatible PAG adjacency with values {-1, 0, 1, 2}.
+
+        PAG format encoding (for FCI aggregator compatibility):
+            For directed edge i → j:
+                adj[i,j] = 2  (forward edge)
+                adj[j,i] = -1 (backward edge)
+            For undirected edge i — j:
+                adj[i,j] = 1
+                adj[j,i] = 1
+            For no edge:
+                adj[i,j] = 0
+                adj[j,i] = 0
+        """
+        n = len(columns)
+        adj = np.zeros((n, n), dtype=int)
+        Endpoint = self.graph.Endpoint
+
+        for i, a in enumerate(columns):
+            na = cpdag.getNode(a)
+            for j, b in enumerate(columns):
+                if i == j:
+                    continue
+                nb = cpdag.getNode(b)
+                e = cpdag.getEdge(na, nb)
+                if e is None:
+                    continue
+
+                # Map endpoints relative to (na, nb)
+                if e.getNode1() == na:
+                    ea = e.getEndpoint1()
+                    eb = e.getEndpoint2()
+                else:
+                    ea = e.getEndpoint2()
+                    eb = e.getEndpoint1()
+
+                # Convert CPDAG endpoints to PAG-compatible values
+                if ea == Endpoint.TAIL and eb == Endpoint.ARROW:
+                    # i → j: directed edge from i to j
+                    adj[i, j] = 2   # forward edge
+                    adj[j, i] = -1  # backward edge
+                elif ea == Endpoint.ARROW and eb == Endpoint.TAIL:
+                    # i ← j: directed edge from j to i
+                    adj[i, j] = -1  # backward edge
+                    adj[j, i] = 2   # forward edge
+                elif ea == Endpoint.TAIL and eb == Endpoint.TAIL:
+                    # i — j: undirected edge
+                    adj[i, j] = 1
+                    adj[j, i] = 1
+
+        return adj
+
+    def _ges_to_pag_format(self, adj_ges: np.ndarray) -> np.ndarray:
+        """
+        Convert GES-compatible adjacency matrix to PAG (FCI-compatible) format.
+
+        Args:
+            adj_ges: Adjacency matrix in GES format {-1, 0, 1}
+                    - Directed i→j: adj[i,j] = -1, adj[j,i] = 1
+                    - Undirected i—j: adj[i,j] = -1, adj[j,i] = -1
+                    - No edge: adj[i,j] = 0, adj[j,i] = 0
+
+        Returns:
+            Adjacency matrix in PAG format {-1, 0, 1, 2}
+                    - Directed i→j: adj[i,j] = 2, adj[j,i] = -1
+                    - Undirected i—j: adj[i,j] = 1, adj[j,i] = 1
+                    - No edge: adj[i,j] = 0, adj[j,i] = 0
+        """
+        n = adj_ges.shape[0]
+        adj_pag = np.zeros((n, n), dtype=int)
+
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                if adj_ges[i, j] == -1 and adj_ges[j, i] == 1:
+                    # Directed edge i → j
+                    adj_pag[i, j] = 2
+                    adj_pag[j, i] = -1
+                elif adj_ges[i, j] == 1 and adj_ges[j, i] == -1:
+                    # Directed edge i ← j
+                    adj_pag[i, j] = -1
+                    adj_pag[j, i] = 2
+                elif adj_ges[i, j] == -1 and adj_ges[j, i] == -1:
+                    # Undirected edge i — j
+                    adj_pag[i, j] = 1
+                    adj_pag[j, i] = 1
+                # No edge: already 0 in adj_pag
+
+        return adj_pag
+
     # ---------------- Public API ----------------
 
     def run(self, data: Union[pd.DataFrame, np.ndarray], columns: Optional[list] = None,
-            prior: Optional[Dict[str, Any]] = None) -> np.ndarray:
+            prior: Optional[Dict[str, Any]] = None, output_format: str = "ges") -> np.ndarray:
         """
-        Run CPC algorithm and return GES-compatible CPDAG adjacency.
+        Run CPC algorithm and return adjacency matrix.
 
         Args:
             data: Input data as DataFrame or numpy array
             columns: Column names (required if data is numpy array)
             prior: Optional prior knowledge dictionary
+            output_format: Output format, either "ges" (default) or "pag" for FCI aggregator compatibility
 
         Returns:
-            Adjacency matrix with GES-compatible values {-1, 0, 1}
+            Adjacency matrix:
+                - If output_format="ges": GES-compatible values {-1, 0, 1}
+                - If output_format="pag": PAG-compatible values {-1, 0, 1, 2} for FCI aggregator
         """
         if isinstance(data, np.ndarray):
             if columns is None:
@@ -219,7 +314,10 @@ class TetradCPC:
             alg.setKnowledge(knowledge)
         
         cpdag = alg.search()
-        return self._cpdag_to_adjacency(cpdag, columns)
+        if output_format == "pag":
+            return self._cpdag_to_adjacency_pag(cpdag, columns)
+        else:
+            return self._cpdag_to_adjacency(cpdag, columns)
 
     def get_parameters(self) -> Dict[str, Any]:
         return {
@@ -236,6 +334,7 @@ def run_cpc(
     depth: int = -1,
     include_undirected: bool = True,
     prior: Optional[Dict] = None,
+    output_format: str = "ges",
 ) -> np.ndarray:
     """
     Convenience function to run CPC (Conservative PC) algorithm.
@@ -247,12 +346,15 @@ def run_cpc(
         depth: Maximum conditioning set size (-1 for unlimited)
         include_undirected: Whether to include undirected edges
         prior: Optional prior knowledge dictionary
+        output_format: Output format, either "ges" (default) or "pag" for FCI aggregator compatibility
 
     Returns:
-        GES-compatible adjacency matrix with values {-1, 0, 1}
+        Adjacency matrix:
+            - If output_format="ges": GES-compatible values {-1, 0, 1}
+            - If output_format="pag": PAG-compatible values {-1, 0, 1, 2} for FCI aggregator
     """
     cpc = TetradCPC(alpha=alpha, depth=depth, include_undirected=include_undirected)
-    return cpc.run(data, columns, prior=prior)
+    return cpc.run(data, columns, prior=prior, output_format=output_format)
 
 
 if __name__ == "__main__":

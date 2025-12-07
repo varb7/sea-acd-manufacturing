@@ -160,8 +160,18 @@ def convert_to_graphs(results, dataset):
             # G includes {-1, 0, 1, 2} for FCI
             # to include padding, we should map this to {1, 2, 3, 4}
             graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
-        elif dataset.algorithm in ["ges", "grasp", "fges", "pc", "cpc"]:
-            # G includes {-1, 0, 1} for GES, GRaSP, FGES, PC, and CPC (CPDAG-based)
+        elif dataset.algorithm in ["pc", "cpc"]:
+            # PC and CPC can output either GES format (for GIES aggregator) or PAG format (for FCI aggregator)
+            # Check if values are in PAG format {-1, 0, 1, 2} or GES format {-1, 0, 1}
+            unique_vals = set(G.flatten())
+            if unique_vals.issubset({-1, 0, 1, 2}) and 2 in unique_vals:
+                # PAG format: route to FCI aggregator
+                graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
+            else:
+                # GES format: route to GIES aggregator (backward compatibility)
+                graphs.append(convert_result_to_lg(G, edge_map_ges))
+        elif dataset.algorithm in ["ges", "grasp", "fges"]:
+            # G includes {-1, 0, 1} for GES, GRaSP, FGES (CPDAG-based)
             graphs.append(convert_result_to_lg(G, edge_map_ges))
         elif dataset.algorithm in ["rfci", "cfci", "fcimax", "gfci"]:
             # PAG-based algorithms return FCI-compatible values {-1,0,1,2}; shift by +2
@@ -443,10 +453,10 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
         return None
 
 
-def run_pc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, columns=None):
+def run_pc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, columns=None, output_format="ges"):
     """
     Tetrad PC wrapper for SEA pipeline.
-    Returns GES-compatible adjacency matrix for GIES aggregator compatibility.
+    Returns adjacency matrix in specified format (GES or PAG).
     
     Args:
         batch: np.ndarray with shape (n_samples, k_vars)
@@ -455,9 +465,12 @@ def run_pc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, col
         include_undirected: whether to include undirected edges
         prior: Optional prior knowledge dictionary
         columns: Optional list of column names (defaults to v0, v1, ...)
+        output_format: "ges" for GIES aggregator (default) or "pag" for FCI aggregator
     
     Returns:
-        np.ndarray: GES-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1}
+        np.ndarray: Adjacency matrix (k_vars, k_vars)
+            - If output_format="ges": GES-compatible values {-1, 0, 1}
+            - If output_format="pag": PAG-compatible values {-1, 0, 1, 2} for FCI aggregator
     """
     if tetrad_run_pc is None:
         print("Warning: PC module not available, skipping batch")
@@ -468,14 +481,15 @@ def run_pc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, col
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module returns GES-compatible format {-1, 0, 1} directly
+        # Module returns format based on output_format parameter
         adj = tetrad_run_pc(
             batch,
             columns=columns,
             alpha=alpha,
             depth=depth,
             include_undirected=include_undirected,
-            prior=prior
+            prior=prior,
+            output_format=output_format
         )
         
         return adj.astype(int)
@@ -484,10 +498,10 @@ def run_pc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, col
         return None
 
 
-def run_cpc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, columns=None):
+def run_cpc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, columns=None, output_format="ges"):
     """
     Tetrad CPC (Conservative PC) wrapper for SEA pipeline.
-    Returns GES-compatible adjacency matrix for GIES aggregator compatibility.
+    Returns adjacency matrix in specified format (GES or PAG).
     
     Args:
         batch: np.ndarray with shape (n_samples, k_vars)
@@ -496,9 +510,12 @@ def run_cpc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, co
         include_undirected: whether to include undirected edges
         prior: Optional prior knowledge dictionary
         columns: Optional list of column names (defaults to v0, v1, ...)
+        output_format: "ges" for GIES aggregator (default) or "pag" for FCI aggregator
     
     Returns:
-        np.ndarray: GES-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1}
+        np.ndarray: Adjacency matrix (k_vars, k_vars)
+            - If output_format="ges": GES-compatible values {-1, 0, 1}
+            - If output_format="pag": PAG-compatible values {-1, 0, 1, 2} for FCI aggregator
     """
     if tetrad_run_cpc is None:
         print("Warning: CPC module not available, skipping batch")
@@ -509,14 +526,15 @@ def run_cpc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, co
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module returns GES-compatible format {-1, 0, 1} directly
+        # Module returns format based on output_format parameter
         adj = tetrad_run_cpc(
             batch,
             columns=columns,
             alpha=alpha,
             depth=depth,
             include_undirected=include_undirected,
-            prior=prior
+            prior=prior,
+            output_format=output_format
         )
         
         return adj.astype(int)
