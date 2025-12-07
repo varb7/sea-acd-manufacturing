@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-PyTetrad FCI-Max wrapper (constraint-based, outputs PAG).
+PyTetrad PC (Peter-Clark) algorithm wrapper.
 
 Features:
 - Robust JVM bootstrap (py-tetrad bundled jar / env / ./resources)
 - Mixed/discrete/continuous CI test selection
-- Optional depth, include_undirected skeleton edges
-- Endpoint mapping robust to Tetrad API variants
+- Optional depth, prior knowledge support
+- Outputs GES-compatible CPDAG format {-1, 0, 1} for GIES aggregator compatibility
 """
 
 import os, glob
@@ -19,9 +19,23 @@ from importlib.resources import files
 from pandas.api.types import is_integer_dtype, is_categorical_dtype, is_float_dtype
 
 
-class TetradFCIMax:
+class TetradPC:
+    """
+    PC algorithm wrapper using PyTetrad.
+
+    Params:
+        alpha: float = 0.05   # CI test significance level
+        depth: int = -1       # max conditioning set size (-1 = unlimited)
+        include_undirected: bool = True  # include undirected edges
+    
+    Output format (GES-compatible):
+        For edge i → j:  adj[i,j] = -1, adj[j,i] = 1
+        For edge i — j:  adj[i,j] = -1, adj[j,i] = -1
+        For no edge:     adj[i,j] = 0,  adj[j,i] = 0
+    """
+
     def __init__(self, **kwargs):
-        self.alpha = kwargs.get("alpha", 0.01)
+        self.alpha = kwargs.get("alpha", 0.05)
         self.depth = kwargs.get("depth", -1)
         self.include_undirected = kwargs.get("include_undirected", True)
 
@@ -29,6 +43,7 @@ class TetradFCIMax:
         self._import_tetrad_modules()
 
     # ---------------- JVM + imports ----------------
+
     def _ensure_jvm(self):
         if jpype.isJVMStarted():
             return
@@ -56,6 +71,7 @@ class TetradFCIMax:
         self.ptt = ptt
 
     # ---------------- Type handling ----------------
+
     def _detect_data_types(self, df: pd.DataFrame) -> Tuple[list, list]:
         cats, cont = [], []
         for c in df.columns:
@@ -82,45 +98,48 @@ class TetradFCIMax:
             tetrad_data = tetrad_data.getDataSet()
         return tetrad_data, cats, cont
 
-    # ---------------- CI tests + FCI-Max ----------------
+    # ---------------- CI test ----------------
+
     def _create_independence_test(self, tetrad_data, cats, cont):
+        """Select appropriate independence test based on data types."""
         if cats and cont:
+            # Mixed data: use Conditional Gaussian LRT
             return self.test.IndTestConditionalGaussianLrt(tetrad_data, self.alpha, True)
         elif cats and not cont:
+            # All discrete: use Chi-Square
             return self.test.IndTestChiSquare(tetrad_data, self.alpha)
         else:
+            # All continuous: use Fisher's Z
             return self.test.IndTestFisherZ(tetrad_data, self.alpha)
 
-    def _run_fci_max(self, indep_test, knowledge=None):
-        alg = self.search.FciMax(indep_test)
-        if hasattr(alg, "setDepth"):
-            alg.setDepth(self.depth)
-        if knowledge is not None:
-            alg.setKnowledge(knowledge)
-        return alg.search()
+    # ---------------- CPDAG → adjacency (GES format) ----------------
 
-    # ---------------- PAG → adjacency ----------------
-    def _pag_to_adjacency_matrix(self, pag, columns: list) -> np.ndarray:
+    def _cpdag_to_adjacency(self, cpdag, columns: list) -> np.ndarray:
         """
-        Convert PAG to FCI-compatible adjacency with values {-1, 0, 1, 2}.
+        Convert CPDAG to GES-compatible adjacency with values {-1, 0, 1}.
 
-        Encoding (to match FCI downstream processing):
-          -1 = backward edge (<-)
-           0 = no edge
-           1 = undirected edge (-)
-           2 = forward edge (->)
+        GES format encoding:
+            For directed edge i → j:
+                adj[i,j] = -1 (outgoing from i)
+                adj[j,i] = 1  (incoming to j)
+            For undirected edge i — j:
+                adj[i,j] = -1
+                adj[j,i] = -1
+            For no edge:
+                adj[i,j] = 0
+                adj[j,i] = 0
         """
         n = len(columns)
         adj = np.zeros((n, n), dtype=int)
         Endpoint = self.graph.Endpoint
 
         for i, a in enumerate(columns):
-            na = pag.getNode(a)
+            na = cpdag.getNode(a)
             for j, b in enumerate(columns):
                 if i == j:
                     continue
-                nb = pag.getNode(b)
-                e = pag.getEdge(na, nb)
+                nb = cpdag.getNode(b)
+                e = cpdag.getEdge(na, nb)
                 if e is None:
                     continue
 
@@ -132,43 +151,41 @@ class TetradFCIMax:
                     ea = e.getEndpoint2()
                     eb = e.getEndpoint1()
 
-                # Convert PAG endpoints to FCI-compatible values
+                # Convert CPDAG endpoints to GES-compatible values
                 if ea == Endpoint.TAIL and eb == Endpoint.ARROW:
-                    # a -> b (definite directed)
-                    adj[i, j] = 2
+                    # i → j: directed edge from i to j
+                    adj[i, j] = -1  # outgoing from i
                 elif ea == Endpoint.ARROW and eb == Endpoint.TAIL:
-                    # a <- b (definite backward)
-                    adj[i, j] = -1
+                    # i ← j: directed edge from j to i
+                    adj[i, j] = 1   # incoming to i
                 elif ea == Endpoint.TAIL and eb == Endpoint.TAIL:
-                    # a - b (undirected/skeleton)
-                    adj[i, j] = 1
-                elif ea == Endpoint.CIRCLE and eb == Endpoint.ARROW:
-                    # a o-> b (partial forward)
-                    adj[i, j] = 2
-                elif ea == Endpoint.ARROW and eb == Endpoint.CIRCLE:
-                    # a <-o b (partial backward)
+                    # i — j: undirected edge
                     adj[i, j] = -1
-                elif ea == Endpoint.CIRCLE and eb == Endpoint.CIRCLE:
-                    # a o-o b (fully uncertain, treat as undirected)
-                    adj[i, j] = 1
-                elif ea == Endpoint.ARROW and eb == Endpoint.ARROW:
-                    # a <-> b (bidirected, treat as undirected for compatibility)
-                    adj[i, j] = 1
-                elif self.include_undirected:
-                    # Fallback: any other edge type treated as undirected
-                    adj[i, j] = 1
 
         return adj
 
     # ---------------- Public API ----------------
+
     def run(self, data: Union[pd.DataFrame, np.ndarray], columns: Optional[list] = None,
-            prior: Optional[dict] = None) -> np.ndarray:
+            prior: Optional[Dict[str, Any]] = None) -> np.ndarray:
+        """
+        Run PC algorithm and return GES-compatible CPDAG adjacency.
+
+        Args:
+            data: Input data as DataFrame or numpy array
+            columns: Column names (required if data is numpy array)
+            prior: Optional prior knowledge dictionary
+
+        Returns:
+            Adjacency matrix with GES-compatible values {-1, 0, 1}
+        """
         if isinstance(data, np.ndarray):
             if columns is None:
                 raise ValueError("Column names must be provided when input is a numpy array.")
             df = pd.DataFrame(data, columns=columns)
         elif isinstance(data, pd.DataFrame):
-            df = data.copy(); columns = list(df.columns)
+            df = data.copy()
+            columns = list(df.columns)
         else:
             raise ValueError("Input data must be a pandas DataFrame or numpy array.")
         if df.empty:
@@ -180,24 +197,77 @@ class TetradFCIMax:
             try:
                 from utils.tetrad_prior_knowledge import build_tetrad_knowledge
                 knowledge = build_tetrad_knowledge(prior, columns)
+                if knowledge is not None:
+                    print(f"[PC] Applied prior knowledge with {len(prior.get('forbidden_edges', []))} forbidden edges, "
+                          f"{len(prior.get('tier_ordering', []))} tiers")
             except Exception as e:
-                print(f"[WARNING] Could not build knowledge for FCI-Max: {e}")
+                print(f"[PC] Warning: Could not build knowledge object: {e}")
+                knowledge = None
 
         tetrad_data, cats, cont = self._convert_to_tetrad_format(df)
         indep = self._create_independence_test(tetrad_data, cats, cont)
-        pag = self._run_fci_max(indep, knowledge)
-        return self._pag_to_adjacency_matrix(pag, columns)
+        
+        # Run PC algorithm
+        alg = self.search.Pc(indep)
+        if hasattr(alg, "setDepth"):
+            alg.setDepth(self.depth)
+        if knowledge is not None and hasattr(alg, "setKnowledge"):
+            alg.setKnowledge(knowledge)
+        
+        cpdag = alg.search()
+        return self._cpdag_to_adjacency(cpdag, columns)
+
+    def get_parameters(self) -> Dict[str, Any]:
+        return {
+            "alpha": self.alpha,
+            "depth": self.depth,
+            "include_undirected": self.include_undirected,
+        }
 
 
-def run_fci_max(
+def run_pc(
     data: Union[pd.DataFrame, np.ndarray],
     columns: Optional[list] = None,
-    alpha: float = 0.01,
+    alpha: float = 0.05,
     depth: int = -1,
     include_undirected: bool = True,
-    prior: Optional[dict] = None,
+    prior: Optional[Dict] = None,
 ) -> np.ndarray:
-    fci_m = TetradFCIMax(alpha=alpha, depth=depth, include_undirected=include_undirected)
-    return fci_m.run(data, columns, prior=prior)
+    """
+    Convenience function to run PC algorithm.
+
+    Args:
+        data: Input data as DataFrame or numpy array
+        columns: Column names (required if data is numpy array)
+        alpha: Significance level for independence tests
+        depth: Maximum conditioning set size (-1 for unlimited)
+        include_undirected: Whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+
+    Returns:
+        GES-compatible adjacency matrix with values {-1, 0, 1}
+    """
+    pc = TetradPC(alpha=alpha, depth=depth, include_undirected=include_undirected)
+    return pc.run(data, columns, prior=prior)
 
 
+if __name__ == "__main__":
+    # Quick test
+    import numpy as np
+    
+    np.random.seed(42)
+    n, k = 200, 5
+    data = np.random.randn(n, k)
+    # Add some dependencies
+    data[:, 1] += 0.8 * data[:, 0]
+    data[:, 2] += 0.6 * data[:, 1]
+    data[:, 3] += 0.5 * data[:, 0] + 0.4 * data[:, 2]
+    
+    columns = [f"v{i}" for i in range(k)]
+    
+    print("Running PC (alpha=0.05, depth=-1)...")
+    adj = run_pc(data, columns=columns, alpha=0.05, depth=-1)
+    print("Adjacency matrix (GES format):")
+    print(adj)
+    print(f"Unique values: {set(adj.flatten())}")
+    print(f"Non-zero edges: {np.sum(adj != 0)}")

@@ -45,6 +45,18 @@ except ImportError:
     print("Warning: GFCI module not found. Please ensure gfci_module.py is accessible.")
     tetrad_run_gfci = None
 
+try:
+    from pc_module import run_pc as tetrad_run_pc
+except ImportError:
+    print("Warning: PC module not found. Please ensure pc_module.py is accessible.")
+    tetrad_run_pc = None
+
+try:
+    from cpc_module import run_cpc as tetrad_run_cpc
+except ImportError:
+    print("Warning: CPC module not found. Please ensure cpc_module.py is accessible.")
+    tetrad_run_cpc = None
+
 
 edge_map_fci = {
     # 0 reserved for padding
@@ -148,8 +160,8 @@ def convert_to_graphs(results, dataset):
             # G includes {-1, 0, 1, 2} for FCI
             # to include padding, we should map this to {1, 2, 3, 4}
             graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
-        elif dataset.algorithm in ["ges", "grasp", "fges"]:
-            # G includes {-1, 0, 1} for GES, GRaSP, and FGES
+        elif dataset.algorithm in ["ges", "grasp", "fges", "pc", "cpc"]:
+            # G includes {-1, 0, 1} for GES, GRaSP, FGES, PC, and CPC (CPDAG-based)
             graphs.append(convert_result_to_lg(G, edge_map_ges))
         elif dataset.algorithm in ["rfci", "cfci", "fcimax", "gfci"]:
             # PAG-based algorithms return FCI-compatible values {-1,0,1,2}; shift by +2
@@ -309,7 +321,7 @@ def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False,
 def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, columns=None):
     """
     Tetrad CFCI wrapper for SEA pipeline.
-    Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
+    Returns FCI-compatible adjacency matrix directly from the module.
     
     Args:
         batch: np.ndarray with shape (n_samples, k_vars)
@@ -331,7 +343,8 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, c
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        adj_binary = tetrad_run_cfci(
+        # Module now returns FCI-compatible format {-1, 0, 1, 2} directly
+        adj_fci = tetrad_run_cfci(
             batch,
             columns=columns,
             alpha=alpha,
@@ -339,19 +352,6 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, c
             include_undirected=include_undirected,
             prior=prior
         )
-        
-        # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
-        adj_fci = np.zeros_like(adj_binary, dtype=int)
-        for i in range(k):
-            for j in range(k):
-                if i == j:
-                    continue
-                if adj_binary[i, j] == 1 and adj_binary[j, i] == 1:
-                    adj_fci[i, j] = 1  # undirected edge
-                elif adj_binary[i, j] == 1:
-                    adj_fci[i, j] = 2  # forward edge
-                elif adj_binary[j, i] == 1:
-                    adj_fci[i, j] = -1  # backward edge
         
         return adj_fci.astype(int)
     except Exception as e:
@@ -362,7 +362,7 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, c
 def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, columns=None):
     """
     Tetrad FCI-Max wrapper for SEA pipeline.
-    Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
+    Returns FCI-compatible adjacency matrix directly from the module.
     
     Args:
         batch: np.ndarray with shape (n_samples, k_vars)
@@ -384,7 +384,8 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        adj_binary = tetrad_run_fci_max(
+        # Module now returns FCI-compatible format {-1, 0, 1, 2} directly
+        adj_fci = tetrad_run_fci_max(
             batch,
             columns=columns,
             alpha=alpha,
@@ -392,19 +393,6 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None
             include_undirected=include_undirected,
             prior=prior
         )
-        
-        # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
-        adj_fci = np.zeros_like(adj_binary, dtype=int)
-        for i in range(k):
-            for j in range(k):
-                if i == j:
-                    continue
-                if adj_binary[i, j] == 1 and adj_binary[j, i] == 1:
-                    adj_fci[i, j] = 1  # undirected edge
-                elif adj_binary[i, j] == 1:
-                    adj_fci[i, j] = 2  # forward edge
-                elif adj_binary[j, i] == 1:
-                    adj_fci[i, j] = -1  # backward edge
         
         return adj_fci.astype(int)
     except Exception as e:
@@ -415,7 +403,7 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None
 def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirected=True, prior=None, columns=None):
     """
     Tetrad GFCI wrapper for SEA pipeline.
-    Converts binary adjacency to FCI-compatible format {-1, 0, 1, 2}.
+    Returns FCI-compatible adjacency matrix directly from the module.
     
     Args:
         batch: np.ndarray with shape (n_samples, k_vars)
@@ -438,7 +426,8 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        adj_binary = tetrad_run_gfci(
+        # Module now returns FCI-compatible format {-1, 0, 1, 2} directly
+        adj_fci = tetrad_run_gfci(
             batch,
             columns=columns,
             alpha=alpha,
@@ -448,22 +437,91 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
             prior=prior
         )
         
-        # Convert binary (0/1) to FCI format {-1, 0, 1, 2}
-        adj_fci = np.zeros_like(adj_binary, dtype=int)
-        for i in range(k):
-            for j in range(k):
-                if i == j:
-                    continue
-                if adj_binary[i, j] == 1 and adj_binary[j, i] == 1:
-                    adj_fci[i, j] = 1  # undirected edge
-                elif adj_binary[i, j] == 1:
-                    adj_fci[i, j] = 2  # forward edge
-                elif adj_binary[j, i] == 1:
-                    adj_fci[i, j] = -1  # backward edge
-        
         return adj_fci.astype(int)
     except Exception as e:
         print(f"GFCI failed for batch: {e}")
+        return None
+
+
+def run_pc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, columns=None):
+    """
+    Tetrad PC wrapper for SEA pipeline.
+    Returns GES-compatible adjacency matrix for GIES aggregator compatibility.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
+    
+    Returns:
+        np.ndarray: GES-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1}
+    """
+    if tetrad_run_pc is None:
+        print("Warning: PC module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
+        
+        # Module returns GES-compatible format {-1, 0, 1} directly
+        adj = tetrad_run_pc(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            include_undirected=include_undirected,
+            prior=prior
+        )
+        
+        return adj.astype(int)
+    except Exception as e:
+        print(f"PC failed for batch: {e}")
+        return None
+
+
+def run_cpc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, columns=None):
+    """
+    Tetrad CPC (Conservative PC) wrapper for SEA pipeline.
+    Returns GES-compatible adjacency matrix for GIES aggregator compatibility.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
+    
+    Returns:
+        np.ndarray: GES-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1}
+    """
+    if tetrad_run_cpc is None:
+        print("Warning: CPC module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
+        
+        # Module returns GES-compatible format {-1, 0, 1} directly
+        adj = tetrad_run_cpc(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            include_undirected=include_undirected,
+            prior=prior
+        )
+        
+        return adj.astype(int)
+    except Exception as e:
+        print(f"CPC failed for batch: {e}")
         return None
 
 

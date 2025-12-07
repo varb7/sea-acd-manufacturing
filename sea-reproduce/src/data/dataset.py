@@ -33,6 +33,8 @@ from .utils import (
     run_cfci,
     run_fci_max,
     run_gfci,
+    run_pc,
+    run_cpc,
 )
 from .utils import convert_to_graphs, convert_to_item
 from helpers import read_csv
@@ -405,7 +407,7 @@ class MetaObservationalDataset(MetaDataset):
         
         for batch, order in batches:
             # For Tetrad algorithms, pass prior knowledge and columns
-            if self.args.algorithm in ["fges", "cfci", "fcimax", "gfci", "rfci"]:
+            if self.args.algorithm in ["fges", "cfci", "fcimax", "gfci", "rfci", "pc", "cpc"]:
                 # Get column names for the SAMPLED variables in this batch
                 # 'order' contains indices of which variables were sampled
                 k = batch.shape[1]
@@ -510,6 +512,10 @@ def get_run_alg(algorithm):
         return run_fci_max
     elif algorithm == "gfci":
         return run_gfci
+    elif algorithm == "pc":
+        return run_pc
+    elif algorithm == "cpc":
+        return run_cpc
     else:
         raise Exception("Unsupported algorithm", algorithm)
 

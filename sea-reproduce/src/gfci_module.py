@@ -77,21 +77,63 @@ class TetradGFCI:
         return score
 
     def _graph_to_adjacency(self, g, columns):
-        n = len(columns); adj = np.zeros((n, n), dtype=int); Endpoint = self.graph.Endpoint
+        """
+        Convert PAG to FCI-compatible adjacency with values {-1, 0, 1, 2}.
+
+        Encoding (to match FCI downstream processing):
+          -1 = backward edge (<-)
+           0 = no edge
+           1 = undirected edge (-)
+           2 = forward edge (->)
+        """
+        n = len(columns)
+        adj = np.zeros((n, n), dtype=int)
+        Endpoint = self.graph.Endpoint
+
         for i, a in enumerate(columns):
             na = g.getNode(a)
             for j, b in enumerate(columns):
-                if i == j: continue
-                nb = g.getNode(b); e = g.getEdge(na, nb)
-                if e is None: continue
+                if i == j:
+                    continue
+                nb = g.getNode(b)
+                e = g.getEdge(na, nb)
+                if e is None:
+                    continue
+
+                # Map endpoints relative to (na, nb)
                 if e.getNode1() == na:
-                    ea, eb = e.getEndpoint1(), e.getEndpoint2()
+                    ea = e.getEndpoint1()
+                    eb = e.getEndpoint2()
                 else:
-                    ea, eb = e.getEndpoint2(), e.getEndpoint1()
+                    ea = e.getEndpoint2()
+                    eb = e.getEndpoint1()
+
+                # Convert PAG endpoints to FCI-compatible values
                 if ea == Endpoint.TAIL and eb == Endpoint.ARROW:
+                    # a -> b (definite directed)
+                    adj[i, j] = 2
+                elif ea == Endpoint.ARROW and eb == Endpoint.TAIL:
+                    # a <- b (definite backward)
+                    adj[i, j] = -1
+                elif ea == Endpoint.TAIL and eb == Endpoint.TAIL:
+                    # a - b (undirected/skeleton)
+                    adj[i, j] = 1
+                elif ea == Endpoint.CIRCLE and eb == Endpoint.ARROW:
+                    # a o-> b (partial forward)
+                    adj[i, j] = 2
+                elif ea == Endpoint.ARROW and eb == Endpoint.CIRCLE:
+                    # a <-o b (partial backward)
+                    adj[i, j] = -1
+                elif ea == Endpoint.CIRCLE and eb == Endpoint.CIRCLE:
+                    # a o-o b (fully uncertain, treat as undirected)
+                    adj[i, j] = 1
+                elif ea == Endpoint.ARROW and eb == Endpoint.ARROW:
+                    # a <-> b (bidirected, treat as undirected for compatibility)
                     adj[i, j] = 1
                 elif self.include_undirected:
-                    adj[i, j] = 1; adj[j, i] = 1
+                    # Fallback: any other edge type treated as undirected
+                    adj[i, j] = 1
+
         return adj
 
     def run(self, data: Union[pd.DataFrame, np.ndarray], columns: Optional[list] = None, 
