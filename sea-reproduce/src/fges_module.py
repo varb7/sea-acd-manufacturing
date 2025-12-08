@@ -25,11 +25,17 @@ warnings.filterwarnings("ignore")
 class TetradFGES:
     """
     Clean FGES wrapper using PyTetrad.
+    
     Parameters:
       penalty_discount: float, score complexity penalty (default 2.0)
       max_degree: int, limit degree per node (-1 = unlimited)
       parallel: bool, try to use multiple threads if supported by the JAR
       equivalent_sample_size: float, for BDeu score on all-discrete data
+    
+    Output format (GES-compatible, matches causal-learn):
+        For edge i → j:  adj[i,j] = -1, adj[j,i] = 1
+        For edge i — j:  adj[i,j] = -1, adj[j,i] = -1
+        For no edge:     adj[i,j] = 0,  adj[j,i] = 0
     """
 
     def __init__(self, **kwargs):
@@ -166,40 +172,54 @@ class TetradFGES:
         """
         Convert DAG/CPDAG to GES-compatible format {-1, 0, 1}.
         
-        GES format:
-        - 0 = no edge
-        - 1 = forward edge (a -> b)
-        - -1 = backward edge (a <- b) or undirected edge (a - b)
+        GES format encoding (matches causal-learn and edge_map_ges):
+            For directed edge i → j:
+                adj[i,j] = -1 (outgoing from i, tail endpoint)
+                adj[j,i] = 1  (incoming to j, arrow endpoint)
+            For undirected edge i — j:
+                adj[i,j] = -1
+                adj[j,i] = -1
+            For no edge:
+                adj[i,j] = 0
+                adj[j,i] = 0
         """
         n = len(columns)
         adj = np.zeros((n, n), dtype=int)
         Endpoint = self.graph.Endpoint  # TAIL, ARROW, ...
 
-        # Iterate declared edges
-        for e in list(dag.getEdges()):
-            n1 = e.getNode1()
-            n2 = e.getNode2()
-            a = n1.getName()
-            b = n2.getName()
-            
-            if a not in columns or b not in columns:
+        # Iterate over all (i, j) pairs (like PC/CPC modules do)
+        for i, a in enumerate(columns):
+            na = dag.getNode(a)
+            if na is None:
                 continue
-                
-            i = columns.index(a)
-            j = columns.index(b)
-            ea = e.getProximalEndpoint(n1)
-            eb = e.getProximalEndpoint(n2)
-            
-            if ea == Endpoint.TAIL and eb == Endpoint.ARROW:
-                # a -> b (forward edge)
-                adj[i, j] = 1
-            elif eb == Endpoint.TAIL and ea == Endpoint.ARROW:
-                # a <- b (backward edge)
-                adj[i, j] = -1
-            elif self.include_undirected and ea == Endpoint.TAIL and eb == Endpoint.TAIL:
-                # a - b (undirected edge in CPDAG)
-                adj[i, j] = -1
-                adj[j, i] = -1
+            for j, b in enumerate(columns):
+                if i == j:
+                    continue
+                nb = dag.getNode(b)
+                if nb is None:
+                    continue
+                e = dag.getEdge(na, nb)
+                if e is None:
+                    continue
+
+                # Map endpoints relative to (na, nb)
+                if e.getNode1() == na:
+                    ea = e.getEndpoint1()
+                    eb = e.getEndpoint2()
+                else:
+                    ea = e.getEndpoint2()
+                    eb = e.getEndpoint1()
+
+                # Convert to GES-compatible values (matching causal-learn format)
+                if ea == Endpoint.TAIL and eb == Endpoint.ARROW:
+                    # i → j: directed edge from i to j
+                    adj[i, j] = -1  # outgoing from i (tail)
+                elif ea == Endpoint.ARROW and eb == Endpoint.TAIL:
+                    # i ← j: directed edge from j to i
+                    adj[i, j] = 1   # incoming to i (arrow)
+                elif ea == Endpoint.TAIL and eb == Endpoint.TAIL:
+                    # i — j: undirected edge
+                    adj[i, j] = -1
         
         return adj
 
