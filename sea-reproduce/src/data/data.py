@@ -21,7 +21,7 @@ from .utils import collate
 
 
 def get_base_dataset(algorithm):
-    if algorithm in ["fci", "rfci", "ges", "fges", "grasp", "cfci", "fcimax", "gfci"]:
+    if algorithm in ["fci", "rfci", "ges", "fges", "grasp", "cfci", "fcimax", "gfci", "pc", "cpc"]:
         return MetaObservationalDataset
     elif algorithm in ["gies"]:
         return MetaInterventionalDataset
