@@ -278,19 +278,23 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
         return None
 
 
-def run_fges_tetrad(batch, penalty_discount=2.0, max_degree=-1, parallel=False, 
-                     equivalent_sample_size=10.0, orient_cpdag_to_dag=True, prior=None, columns=None):
+def run_fges_tetrad(batch, penalty_discount=1.0, max_degree=-1, parallel=False, 
+                     equivalent_sample_size=10.0, orient_cpdag_to_dag=False, prior=None, columns=None):
     """
     Tetrad FGES wrapper for SEA pipeline.
     Returns GES-compatible format {-1, 0, 1} for use with edge_map_ges.
     
+    NOTE: orient_cpdag_to_dag=False preserves CPDAG format to match causal-learn GES output.
+    This is critical for SEA aggregator compatibility - the aggregator expects edge type 4
+    (undirected/confused edges) which are lost when converting CPDAG to DAG.
+    
     Args:
         batch: np.ndarray with shape (n_samples, k_vars)
-        penalty_discount: score complexity penalty
+        penalty_discount: score complexity penalty (1.0 = standard BIC, matches causal-learn GES)
         max_degree: limit degree per node (-1 = unlimited)
         parallel: try to use multiple threads
         equivalent_sample_size: for BDeu score on discrete data
-        orient_cpdag_to_dag: convert CPDAG to DAG
+        orient_cpdag_to_dag: convert CPDAG to DAG (False recommended for SEA compatibility)
         prior: Optional prior knowledge dictionary
         columns: Optional list of column names (defaults to v0, v1, ...)
     

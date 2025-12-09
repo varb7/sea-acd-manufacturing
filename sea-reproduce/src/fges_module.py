@@ -39,14 +39,15 @@ class TetradFGES:
     """
 
     def __init__(self, **kwargs):
-        self.penalty_discount = kwargs.get("penalty_discount", 2.0)
+        self.penalty_discount = kwargs.get("penalty_discount", 1.0)  # 1.0 = standard BIC
         self.max_degree = kwargs.get("max_degree", -1)
         self.parallel = kwargs.get("parallel", False)
         self.equivalent_sample_size = kwargs.get("equivalent_sample_size", 10.0)
         # When True, include undirected CPDAG edges (TAIL-TAIL) as symmetric edges in adjacency
         self.include_undirected = kwargs.get("include_undirected", True)
-        # When True, convert CPDAG to a DAG using GraphTransforms.dagFromCpdag
-        self.orient_cpdag_to_dag = kwargs.get("orient_cpdag_to_dag", True)
+        # When False (default), preserve CPDAG format for SEA aggregator compatibility
+        # The aggregator expects undirected edges (type 4) which are lost in DAG conversion
+        self.orient_cpdag_to_dag = kwargs.get("orient_cpdag_to_dag", False)
 
         self._ensure_jvm()
         self._import_tetrad_modules()
@@ -272,13 +273,33 @@ class TetradFGES:
 def run_fges(
     data: Union[pd.DataFrame, np.ndarray],
     columns: Optional[list] = None,
-    penalty_discount: float = 2.0,
+    penalty_discount: float = 1.0,
     max_degree: int = -1,
     parallel: bool = False,
     equivalent_sample_size: float = 10.0,
-    orient_cpdag_to_dag: bool = True,
+    orient_cpdag_to_dag: bool = False,
     prior: Optional[Dict[str, Any]] = None,
 ) -> np.ndarray:
+    """
+    Run FGES and return GES-compatible adjacency matrix {-1, 0, 1}.
+    
+    NOTE: Default orient_cpdag_to_dag=False preserves CPDAG format for SEA aggregator
+    compatibility. The aggregator expects undirected edges (type 4) which are lost
+    when converting CPDAG to DAG.
+    
+    Args:
+        data: Input data as DataFrame or numpy array
+        columns: Column names (required if data is numpy array)
+        penalty_discount: Score complexity penalty (1.0 = standard BIC)
+        max_degree: Limit degree per node (-1 = unlimited)
+        parallel: Try to use multiple threads
+        equivalent_sample_size: For BDeu score on discrete data
+        orient_cpdag_to_dag: Convert CPDAG to DAG (False for SEA compatibility)
+        prior: Optional prior knowledge dictionary
+    
+    Returns:
+        np.ndarray: GES-compatible adjacency matrix with values {-1, 0, 1}
+    """
     fges = TetradFGES(
         penalty_discount=penalty_discount,
         max_degree=max_degree,
