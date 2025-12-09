@@ -161,15 +161,10 @@ def convert_to_graphs(results, dataset):
             # to include padding, we should map this to {1, 2, 3, 4}
             graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
         elif dataset.algorithm in ["pc", "cpc"]:
-            # PC and CPC can output either GES format (for GIES aggregator) or PAG format (for FCI aggregator)
-            # Check if values are in PAG format {-1, 0, 1, 2} or GES format {-1, 0, 1}
-            unique_vals = set(G.flatten())
-            if unique_vals.issubset({-1, 0, 1, 2}) and 2 in unique_vals:
-                # PAG format: route to FCI aggregator
-                graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
-            else:
-                # GES format: route to GIES aggregator (backward compatibility)
-                graphs.append(convert_result_to_lg(G, edge_map_ges))
+            # PC and CPC output PAG format {-1, 0, 1, 2} for FCI aggregator
+            # Values: -1 (backward), 0 (no edge), 1 (undirected), 2 (forward)
+            # Shift by +2 to map to {1, 2, 3, 4} for edge_map_fci
+            graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
         elif dataset.algorithm in ["ges", "grasp", "fges"]:
             # G includes {-1, 0, 1} for GES, GRaSP, FGES (CPDAG-based)
             graphs.append(convert_result_to_lg(G, edge_map_ges))
