@@ -35,6 +35,9 @@ from .utils import (
     run_gfci,
     run_pc,
     run_cpc,
+    run_boss_fci,
+    run_grasp_fci,
+    run_tetrad_fci,
 )
 from .utils import convert_to_graphs, convert_to_item
 from helpers import read_csv
@@ -528,6 +531,12 @@ def get_run_alg(algorithm):
         return run_pc
     elif algorithm == "cpc":
         return run_cpc
+    elif algorithm == "bossfci":
+        return run_boss_fci
+    elif algorithm == "graspfci":
+        return run_grasp_fci
+    elif algorithm == "tetradfci":
+        return run_tetrad_fci
     else:
         raise Exception("Unsupported algorithm", algorithm)
 
