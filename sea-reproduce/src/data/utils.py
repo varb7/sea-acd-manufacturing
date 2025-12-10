@@ -57,6 +57,24 @@ except ImportError:
     print("Warning: CPC module not found. Please ensure cpc_module.py is accessible.")
     tetrad_run_cpc = None
 
+try:
+    from boss_fci_module import run_boss_fci as tetrad_run_boss_fci
+except ImportError:
+    print("Warning: BOSS-FCI module not found. Please ensure boss_fci_module.py is accessible.")
+    tetrad_run_boss_fci = None
+
+try:
+    from grasp_fci_module import run_grasp_fci as tetrad_run_grasp_fci
+except ImportError:
+    print("Warning: GRaSP-FCI module not found. Please ensure grasp_fci_module.py is accessible.")
+    tetrad_run_grasp_fci = None
+
+try:
+    from tetrad_fci_module import run_tetrad_fci as tetrad_run_tetrad_fci
+except ImportError:
+    print("Warning: Tetrad FCI module not found. Please ensure tetrad_fci_module.py is accessible.")
+    tetrad_run_tetrad_fci = None
+
 
 edge_map_fci = {
     # 0 reserved for padding
@@ -168,7 +186,7 @@ def convert_to_graphs(results, dataset):
         elif dataset.algorithm in ["ges", "grasp", "fges"]:
             # G includes {-1, 0, 1} for GES, GRaSP, FGES (CPDAG-based)
             graphs.append(convert_result_to_lg(G, edge_map_ges))
-        elif dataset.algorithm in ["rfci", "cfci", "fcimax", "gfci"]:
+        elif dataset.algorithm in ["rfci", "cfci", "fcimax", "gfci", "bossfci", "graspfci", "tetradfci"]:
             # PAG-based algorithms return FCI-compatible values {-1,0,1,2}; shift by +2
             graphs.append(convert_result_to_lg(G + 2, edge_map_fci))
         else:
@@ -539,6 +557,144 @@ def run_cpc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, co
         return adj.astype(int)
     except Exception as e:
         print(f"CPC failed for batch: {e}")
+        return None
+
+
+def run_boss_fci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirected=True, prior=None, columns=None):
+    """
+    Tetrad BOSS-FCI wrapper for SEA pipeline.
+    Returns FCI-compatible adjacency matrix directly from the module.
+    
+    BOSS-FCI is a hybrid algorithm that combines BOSS (Best Order Score Search)
+    with FCI orientation rules to produce a PAG.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        penalty_discount: score complexity penalty
+        include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
+    
+    Returns:
+        np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
+    """
+    if tetrad_run_boss_fci is None:
+        print("Warning: BOSS-FCI module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
+        
+        # Module returns FCI-compatible format {-1, 0, 1, 2} directly
+        adj_fci = tetrad_run_boss_fci(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            penalty_discount=penalty_discount,
+            include_undirected=include_undirected,
+            prior=prior
+        )
+        
+        return adj_fci.astype(int)
+    except Exception as e:
+        print(f"BOSS-FCI failed for batch: {e}")
+        return None
+
+
+def run_grasp_fci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirected=True, prior=None, columns=None):
+    """
+    Tetrad GRaSP-FCI wrapper for SEA pipeline.
+    Returns FCI-compatible adjacency matrix directly from the module.
+    
+    GRaSP-FCI is a hybrid algorithm that combines GRaSP (Greedy Relaxations of
+    Sparsest Permutation) with FCI orientation rules to produce a PAG.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        penalty_discount: score complexity penalty
+        include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
+    
+    Returns:
+        np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
+    """
+    if tetrad_run_grasp_fci is None:
+        print("Warning: GRaSP-FCI module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
+        
+        # Module returns FCI-compatible format {-1, 0, 1, 2} directly
+        adj_fci = tetrad_run_grasp_fci(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            penalty_discount=penalty_discount,
+            include_undirected=include_undirected,
+            prior=prior
+        )
+        
+        return adj_fci.astype(int)
+    except Exception as e:
+        print(f"GRaSP-FCI failed for batch: {e}")
+        return None
+
+
+def run_tetrad_fci(batch, alpha=0.01, depth=-1, max_path_length=-1, include_undirected=True, prior=None, columns=None):
+    """
+    Tetrad standard FCI wrapper for SEA pipeline.
+    Returns FCI-compatible adjacency matrix directly from the module.
+    
+    This is the standard FCI algorithm implemented in Tetrad, which handles
+    latent confounders and selection bias to produce a PAG.
+    
+    Args:
+        batch: np.ndarray with shape (n_samples, k_vars)
+        alpha: significance level for independence tests
+        depth: max conditioning set size (-1 = unlimited)
+        max_path_length: max path length for discriminating path rule (-1 = unlimited)
+        include_undirected: whether to include undirected edges
+        prior: Optional prior knowledge dictionary
+        columns: Optional list of column names (defaults to v0, v1, ...)
+    
+    Returns:
+        np.ndarray: FCI-compatible adjacency matrix (k_vars, k_vars) with values {-1, 0, 1, 2}
+    """
+    if tetrad_run_tetrad_fci is None:
+        print("Warning: Tetrad FCI module not available, skipping batch")
+        return None
+    
+    try:
+        k = batch.shape[1]
+        if columns is None:
+            columns = [f"v{i}" for i in range(k)]
+        
+        # Module returns FCI-compatible format {-1, 0, 1, 2} directly
+        adj_fci = tetrad_run_tetrad_fci(
+            batch,
+            columns=columns,
+            alpha=alpha,
+            depth=depth,
+            max_path_length=max_path_length,
+            include_undirected=include_undirected,
+            prior=prior
+        )
+        
+        return adj_fci.astype(int)
+    except Exception as e:
+        print(f"Tetrad FCI failed for batch: {e}")
         return None
 
 
