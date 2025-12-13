@@ -28,6 +28,59 @@ def set_seed(seed):
     torch.cuda.manual_seed(seed)
 
 
+def compute_structural_metrics(pred_list, true_list):
+    """
+    Compute SHD, NNZ, SID from prediction and true edge lists.
+    
+    Args:
+        pred_list: list of predicted edge probabilities (flattened)
+        true_list: list of true edge labels (flattened)
+    
+    Returns:
+        shd: Structural Hamming Distance
+        normalized_shd: SHD normalized by number of possible edges
+        nnz: Number of non-zero (predicted) edges
+        sid: Structural Intervention Distance (placeholder)
+        normalized_sid: Normalized SID (placeholder)
+    """
+    if not pred_list or not true_list:
+        return None, None, None, None, None
+    
+    n_edges = len(pred_list)
+    if n_edges == 0:
+        return 0, 0.0, 0, None, None
+    
+    # Convert to numpy arrays
+    pred_arr = np.array(pred_list)
+    true_arr = np.array(true_list)
+    
+    # Threshold predictions at 0.5 to get binary predictions
+    pred_binary = (pred_arr > 0.5).astype(int)
+    true_binary = (true_arr > 0).astype(int)
+    
+    # SHD = number of differing edges (mismatches)
+    shd = int(np.sum(pred_binary != true_binary))
+    
+    # Normalized SHD (by total number of edge positions)
+    # n_edges represents the upper triangle entries for directed edges
+    # For n_vars nodes: n_edges = n_vars * (n_vars - 1)
+    # Solve: n^2 - n = n_edges => n = (1 + sqrt(1 + 4*n_edges)) / 2
+    n_vars = int((1 + np.sqrt(1 + 4 * n_edges)) / 2)
+    max_edges = n_vars * (n_vars - 1)
+    normalized_shd = shd / max_edges if max_edges > 0 else 0.0
+    
+    # NNZ = number of predicted edges (non-zero in prediction)
+    nnz = int(np.sum(pred_binary))
+    
+    # SID (Structural Intervention Distance) - requires DAG comparison
+    # This is more complex and typically requires specialized libraries
+    # For now, we'll leave it as None (can be added later if needed)
+    sid = None
+    normalized_sid = None
+    
+    return shd, normalized_shd, nnz, sid, normalized_sid
+
+
 def main():
     printt("Starting...")
     with open("data/goodluck.txt") as f:
@@ -146,6 +199,23 @@ def main():
             key_to_metrics[key]["true"].append(true[i])
         if i < len(pred):
             key_to_metrics[key]["pred"].append(pred[i])
+        
+        # Compute structural metrics from predictions and ground truth
+        if i < len(pred) and i < len(true) and pred[i] and true[i]:
+            shd, norm_shd, nnz, sid, norm_sid = compute_structural_metrics(
+                pred[i], true[i]
+            )
+            if shd is not None:
+                key_to_metrics[key]["shd"].append(shd)
+            if norm_shd is not None:
+                key_to_metrics[key]["normalized_shd"].append(norm_shd)
+            if nnz is not None:
+                key_to_metrics[key]["nnz"].append(nnz)
+            if sid is not None:
+                key_to_metrics[key]["sid"].append(sid)
+            if norm_sid is not None:
+                key_to_metrics[key]["normalized_sid"].append(norm_sid)
+    
     key_to_metrics = dict(key_to_metrics)
     save_pickle(args.results_file, key_to_metrics)
     printt("All done. Exiting.")

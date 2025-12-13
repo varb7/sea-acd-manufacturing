@@ -59,7 +59,9 @@ class Aggregator(pl.LightningModule):
                 save_preds=True)
         end = time.time()  # keep track of GPU time
         # run with batch_size=1 for accurate timing
-        results["time"] = batch["time"] + (end - start)
+        # Convert tensor to float to avoid serialization issues
+        time_val = batch["time"] + (end - start)
+        results["time"] = time_val.item() if torch.is_tensor(time_val) else time_val
         return results
 
     def symmetrize(self, output, batch, reduce=True):
@@ -237,16 +239,23 @@ class Aggregator(pl.LightningModule):
         print(f"DEBUG: batch keys: {batch.keys() if isinstance(batch, dict) else 'Not a dict'}")
         
         try:
+            # Track time for inference (same as forward())
+            start = time.time()
+            
             output = self.encoder(batch)
             print(f"DEBUG: Encoder output shape: {output.shape}")
             
-            losses = self.compute_losses(output, batch)
-            print(f"DEBUG: Losses computed: {losses.keys()}")
-            
-            # metrics
+            # metrics - save_preds=True to get pred/true for structural metrics
             results = self.compute_metrics_per_graph(output, batch,
-                    save_preds=False)
+                    save_preds=True)
             print(f"DEBUG: Metrics computed: {results.keys()}")
+            
+            end = time.time()
+            
+            # Add time: batch["time"] is CPU time from dataset, add GPU inference time
+            # Convert tensor to float to avoid serialization issues
+            time_val = batch["time"] + (end - start)
+            results["time"] = time_val.item() if torch.is_tensor(time_val) else time_val
             
             return results
             
