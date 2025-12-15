@@ -22,10 +22,16 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def set_seed(seed):
+    """Set random seed for reproducibility across all libraries."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # For multi-GPU
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    # Make cudnn deterministic (may slow down training slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def compute_structural_metrics(pred_list, true_list):

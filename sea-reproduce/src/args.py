@@ -187,9 +187,15 @@ def process_args(args):
             config = yaml.safe_load(f)
         override_args(args, config)
 
-    # prepend output root
+    # prepend output root (unless absolute path or contains directory separator)
     args.args_file = os.path.join(args.save_path, args.args_file)
-    args.results_file  = os.path.join(args.save_path, args.results_file)
+    # Only join with save_path if results_file is a simple filename (no path separators)
+    if os.path.dirname(args.results_file) == "" and not os.path.isabs(args.results_file):
+        args.results_file = os.path.join(args.save_path, args.results_file)
+    # Ensure parent directory exists for results file
+    results_dir = os.path.dirname(args.results_file)
+    if results_dir and not os.path.exists(results_dir):
+        os.makedirs(results_dir, exist_ok=True)
 
     # finally load all saved parameters
     if len(args.checkpoint_path) > 0:
