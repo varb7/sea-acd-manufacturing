@@ -19,8 +19,12 @@ from torch.optim import AdamW
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
-from torchmetrics.classification import BinaryAccuracy
+from torchmetrics.classification import (
+            BinaryAUROC,
+            BinaryAveragePrecision,
+            BinaryAccuracy,
+            BinaryF1Score,
+        )
 
 from .axial import AxialTransformer, TopLayer
 from .utils import get_params_groups
@@ -46,6 +50,7 @@ class Aggregator(pl.LightningModule):
         self.auroc = BinaryAUROC()
         self.auprc = BinaryAveragePrecision()
         self.acc = BinaryAccuracy()
+        self.f1 = BinaryF1Score()
 
         self.save_hyperparameters()
 
@@ -144,7 +149,7 @@ class Aggregator(pl.LightningModule):
         """
             Split up individual graphs from batch
         """
-        auroc, auprc, acc = [], [], []
+        auroc, auprc, acc, f1 = [], [], [], []
         if save_preds:
             pred_list, true_list = [], []
         # do not reduce over batch
@@ -179,11 +184,13 @@ class Aggregator(pl.LightningModule):
                 auroc.append(self.auroc(p, t).item())
                 auprc.append(self.auprc(p, t).item())
                 acc.append(self.acc(p, t).item())
+                f1.append(self.f1(p, t).item())
             except (IndexError, RuntimeError, ValueError) as e:
                 print(f"WARNING: Metric computation failed for graph {i}: {e}")
                 auroc.append(float('nan'))
                 auprc.append(float('nan'))
                 acc.append(float('nan'))
+                f1.append(float('nan'))
             
             if save_preds:
                 pred_list.append(p.tolist())
@@ -193,6 +200,7 @@ class Aggregator(pl.LightningModule):
         outputs["auroc"] = auroc
         outputs["auprc"] = auprc
         outputs["acc"] = acc
+        outputs["f1"] = f1
         # need to save these...
         outputs["key"] = batch["key"]
         if save_preds:

@@ -199,6 +199,8 @@ def main():
             key_to_metrics[key]["auc"].append(auc[i])
         if i < len(prc):
             key_to_metrics[key]["prc"].append(prc[i])
+        if "f1" in results_dict and i < len(results_dict["f1"]):
+            key_to_metrics[key]["f1"].append(results_dict["f1"][i])
         if i < len(time_list):
             key_to_metrics[key]["time"].append(time_list[i])
         if i < len(true):

@@ -10,8 +10,12 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
-from torchmetrics.classification import BinaryAccuracy
+from torchmetrics.classification import (
+            BinaryAUROC,
+            BinaryAveragePrecision,
+            BinaryAccuracy,
+            BinaryF1Score,
+        )
 
 
 class CausalBaseline(pl.LightningModule):
@@ -25,6 +29,7 @@ class CausalBaseline(pl.LightningModule):
         self.auroc = BinaryAUROC()
         self.auprc = BinaryAveragePrecision()
         self.acc = BinaryAccuracy()
+        self.f1 = BinaryF1Score()
 
         self.save_hyperparameters()
 
@@ -84,7 +89,7 @@ class CausalBaseline(pl.LightningModule):
         backward_mask = batch["backward_mask"]
         backward_order = [order for order in batch["backward_order"]]
 
-        auroc, auprc, acc = [], [], []
+        auroc, auprc, acc, f1 = [], [], [], []
         if save_preds:
             pred_list, true_list = [], []
         # symmetrize edges
@@ -100,9 +105,11 @@ class CausalBaseline(pl.LightningModule):
         self.auroc.reset()
         self.auprc.reset()
         self.acc.reset()
+        self.f1.reset()
         auroc.append(self.auroc(p, t).item())
         auprc.append(self.auprc(p, t).item())
         acc.append(self.acc(p, t).item())
+        f1.append(self.f1(p, t).item())
         if save_preds:
             pred_list.append(p.tolist())
             true_list.append(t.tolist())
@@ -111,6 +118,7 @@ class CausalBaseline(pl.LightningModule):
         outputs["auroc"] = auroc
         outputs["auprc"] = auprc
         outputs["acc"] = acc
+        outputs["f1"] = f1
         # need to save these...
         outputs["key"] = batch["key"]
         if save_preds:

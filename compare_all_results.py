@@ -10,6 +10,7 @@ a comprehensive comparison of all methods in a single run.
 import os
 import sys
 import glob
+import pickle
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -29,7 +30,143 @@ else:
     if os.path.exists(parent_src):
         sys.path.insert(0, parent_src)
 
-from utils import read_pickle
+
+def read_pickle_safe(fp):
+    """
+    Safely read pickle file, handling PyTorch tensors and other compiled extensions.
+    Uses a mock torch module to prevent DLL import failures.
+    """
+    import sys
+    from types import ModuleType
+    
+    # Save original torch if it exists
+    original_torch = sys.modules.get('torch', None)
+    torch_was_imported = 'torch' in sys.modules
+    
+    # Create a mock torch module to prevent actual import during unpickling
+    class MockTensor:
+        """Mock PyTorch tensor that can be converted to numpy."""
+        def __init__(self, *args, **kwargs):
+            # Try to extract data from various formats
+            if args:
+                if isinstance(args[0], (list, tuple)):
+                    self._data = np.array(args[0])
+                elif isinstance(args[0], np.ndarray):
+                    self._data = args[0].copy()
+                elif hasattr(args[0], 'numpy'):
+                    try:
+                        self._data = args[0].numpy()
+                    except:
+                        self._data = np.array([])
+                else:
+                    self._data = np.array(args[0]) if args else np.array([])
+            else:
+                self._data = np.array([])
+        
+        def detach(self):
+            return self
+        
+        def cpu(self):
+            return self
+        
+        def numpy(self):
+            return self._data
+        
+        def tolist(self):
+            return self._data.tolist()
+        
+        def __getstate__(self):
+            return {'_data': self._data}
+        
+        def __setstate__(self, state):
+            self._data = state.get('_data', np.array([]))
+    
+    # Create mock torch module
+    mock_torch = ModuleType('torch')
+    mock_torch.Tensor = MockTensor
+    mock_torch.FloatTensor = MockTensor
+    mock_torch.LongTensor = MockTensor
+    mock_torch.IntTensor = MockTensor
+    mock_torch.DoubleTensor = MockTensor
+    
+    # Install mock before loading
+    sys.modules['torch'] = mock_torch
+    
+    try:
+        # Now load the pickle - it will use our mock torch
+        with open(fp, "rb") as f:
+            data = pickle.load(f)
+        
+        # Convert any mock tensors to numpy arrays recursively
+        def convert_tensors(obj):
+            if isinstance(obj, dict):
+                return {k: convert_tensors(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_tensors(item) for item in obj]
+            elif isinstance(obj, MockTensor):
+                return obj.numpy()
+            elif hasattr(obj, 'numpy') and hasattr(obj, 'cpu'):
+                try:
+                    return obj.numpy()
+                except:
+                    return obj
+            else:
+                return obj
+        
+        data = convert_tensors(data)
+        return data
+        
+    except Exception as e:
+        # If that fails, try with a simpler approach - just ignore torch classes
+        try:
+            class IgnoreTorchUnpickler(pickle.Unpickler):
+                def find_class(self, module, name):
+                    if module.startswith('torch'):
+                        # Return a simple class that can hold data
+                        class TorchPlaceholder:
+                            def __init__(self, *args, **kwargs):
+                                self.args = args
+                                self.kwargs = kwargs
+                                # Try to extract numpy data if present
+                                if args and isinstance(args[0], np.ndarray):
+                                    self.data = args[0]
+                                elif args and isinstance(args[0], (list, tuple)):
+                                    self.data = np.array(args[0])
+                                else:
+                                    self.data = np.array([])
+                            
+                            def numpy(self):
+                                return self.data
+                        return TorchPlaceholder
+                    return super().find_class(module, name)
+            
+            with open(fp, "rb") as f:
+                unpickler = IgnoreTorchUnpickler(f)
+                data = unpickler.load()
+            
+            # Convert placeholders to numpy
+            def convert_placeholders(obj):
+                if isinstance(obj, dict):
+                    return {k: convert_placeholders(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_placeholders(item) for item in obj]
+                elif hasattr(obj, 'data'):
+                    return obj.data if hasattr(obj, 'data') else obj
+                else:
+                    return obj
+            
+            data = convert_placeholders(data)
+            return data
+            
+        except Exception as e2:
+            raise Exception(f"Failed to load pickle. Error 1: {e}, Error 2: {e2}")
+    finally:
+        # Restore original torch if it existed
+        if torch_was_imported and original_torch is not None:
+            sys.modules['torch'] = original_torch
+        elif not torch_was_imported and 'torch' in sys.modules:
+            # Remove mock if torch wasn't originally imported
+            del sys.modules['torch']
 
 
 def find_result_files(directory="."):
@@ -58,11 +195,14 @@ def load_all_results(result_files):
         method_name = extract_method_name(filepath)
         print(f"Loading: {os.path.basename(filepath)} -> {method_name}")
         try:
-            data = read_pickle(filepath)
+            data = read_pickle_safe(filepath)
             results[filepath] = data
             method_names[filepath] = method_name
+            print(f"  Successfully loaded {len(data)} datasets")
         except Exception as e:
             print(f"  Warning: Failed to load {filepath}: {e}")
+            import traceback
+            traceback.print_exc()
     
     return results, method_names
 
@@ -84,25 +224,30 @@ def get_common_datasets(results_dict):
 
 def compute_metrics(data):
     """Compute mean and std for metrics in a dataset."""
-    auc_scores = data.get("auc", [])
-    prc_scores = data.get("prc", [])
-    times = data.get("time", [])
+    auc_scores = [s for s in data.get("auc", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    prc_scores = [s for s in data.get("prc", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    f1_scores = [s for s in data.get("f1", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    times = [s for s in data.get("time", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
     
     # New metrics
-    shd_scores = [s for s in data.get("shd", []) if s is not None]
-    normalized_shd_scores = [s for s in data.get("normalized_shd", []) if s is not None]
-    nnz_scores = [s for s in data.get("nnz", []) if s is not None]
-    sid_scores = [s for s in data.get("sid", []) if s is not None]
-    normalized_sid_scores = [s for s in data.get("normalized_sid", []) if s is not None]
+    shd_scores = [s for s in data.get("shd", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    normalized_shd_scores = [s for s in data.get("normalized_shd", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    nnz_scores = [s for s in data.get("nnz", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    sid_scores = [s for s in data.get("sid", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    normalized_sid_scores = [s for s in data.get("normalized_sid", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
     
     metrics = {
-        "auc_mean": np.mean(auc_scores) if auc_scores else 0.0,
-        "auc_std": np.std(auc_scores) if auc_scores else 0.0,
-        "prc_mean": np.mean(prc_scores) if prc_scores else 0.0,
-        "prc_std": np.std(prc_scores) if prc_scores else 0.0,
-        "time_mean": np.mean(times) if times else 0.0,
-        "time_std": np.std(times) if times else 0.0,
+        "auc_mean": np.mean(auc_scores) if auc_scores else None,
+        "auc_std": np.std(auc_scores) if auc_scores else None,
+        "prc_mean": np.mean(prc_scores) if prc_scores else None,
+        "prc_std": np.std(prc_scores) if prc_scores else None,
+        "time_mean": np.mean(times) if times else None,
+        "time_std": np.std(times) if times else None,
         "n_samples": len(auc_scores) if auc_scores else 0,
+
+        # New metric
+        "f1_mean": np.mean(f1_scores) if f1_scores else None,
+        "f1_std": np.std(f1_scores) if f1_scores else None,
         
         # New metrics
         "shd_mean": np.mean(shd_scores) if shd_scores else None,
@@ -137,6 +282,8 @@ def create_comparison_table(results_dict, method_names, common_datasets):
             row[f"{method_name}_AUC_std"] = metrics["auc_std"]
             row[f"{method_name}_AUPRC"] = metrics["prc_mean"]
             row[f"{method_name}_AUPRC_std"] = metrics["prc_std"]
+            row[f"{method_name}_F1"] = metrics["f1_mean"]
+            row[f"{method_name}_F1_std"] = metrics["f1_std"]
             row[f"{method_name}_Time"] = metrics["time_mean"]
             row[f"{method_name}_Time_std"] = metrics["time_std"]
             row[f"{method_name}_N"] = metrics["n_samples"]
@@ -172,6 +319,7 @@ def create_summary_table(results_dict, method_names, common_datasets):
         
         all_auc = []
         all_prc = []
+        all_f1 = []
         all_times = []
         all_shd = []
         all_normalized_shd = []
@@ -184,15 +332,17 @@ def create_summary_table(results_dict, method_names, common_datasets):
             data = results[dataset]
             auc_scores = data.get("auc", [])
             prc_scores = data.get("prc", [])
+            f1_scores = data.get("f1", [])
             times = data.get("time", [])
             shd_scores = [s for s in data.get("shd", []) if s is not None]
             normalized_shd_scores = [s for s in data.get("normalized_shd", []) if s is not None]
             nnz_scores = [s for s in data.get("nnz", []) if s is not None]
             sid_scores = [s for s in data.get("sid", []) if s is not None]
             normalized_sid_scores = [s for s in data.get("normalized_sid", []) if s is not None]
-            
+
             all_auc.extend(auc_scores)
             all_prc.extend(prc_scores)
+            all_f1.extend(f1_scores)
             all_times.extend(times)
             all_shd.extend(shd_scores)
             all_normalized_shd.extend(normalized_shd_scores)
@@ -203,12 +353,14 @@ def create_summary_table(results_dict, method_names, common_datasets):
         
         summary_data.append({
             "Method": method_name,
-            "Avg_AUC": np.mean(all_auc) if all_auc else 0.0,
-            "AUC_std": np.std(all_auc) if all_auc else 0.0,
-            "Avg_AUPRC": np.mean(all_prc) if all_prc else 0.0,
-            "AUPRC_std": np.std(all_prc) if all_prc else 0.0,
-            "Avg_Time": np.mean(all_times) if all_times else 0.0,
-            "Time_std": np.std(all_times) if all_times else 0.0,
+            "Avg_AUC": np.mean(all_auc) if all_auc else None,
+            "AUC_std": np.std(all_auc) if all_auc else None,
+            "Avg_AUPRC": np.mean(all_prc) if all_prc else None,
+            "AUPRC_std": np.std(all_prc) if all_prc else None,
+            "Avg_F1": np.mean(all_f1) if all_f1 else None,
+            "F1_std": np.std(all_f1) if all_f1 else None,
+            "Avg_Time": np.mean(all_times) if all_times else None,
+            "Time_std": np.std(all_times) if all_times else None,
             "Avg_SHD": np.mean(all_shd) if all_shd else None,
             "SHD_std": np.std(all_shd) if all_shd else None,
             "Avg_Norm_SHD": np.mean(all_normalized_shd) if all_normalized_shd else None,
@@ -261,6 +413,21 @@ def print_detailed_comparison(df, method_names):
                 prc_df[method] = df[col_mean].apply(lambda x: f"{x:.3f}") + " ± " + df[col_std].apply(lambda x: f"{x:.3f}")
         display_cols = ["Dataset"] + methods
         print(prc_df[display_cols].to_string(index=False))
+    
+    # Print F1 comparison
+    print("\n--- F1 Scores (Mean ± Std) ---")
+    f1_cols = ["Dataset"] + [f"{m}_F1" for m in methods]
+    if all(col in df.columns for col in f1_cols):
+        f1_df = df[f1_cols].copy()
+        for method in methods:
+            col_mean = f"{method}_F1"
+            col_std = f"{method}_F1_std"
+            if col_mean in df.columns and col_std in df.columns:
+                def fmt(v):
+                    return "N/A" if pd.isna(v) or v is None else f"{v:.3f}"
+                f1_df[method] = df[col_mean].apply(fmt) + " ± " + df[col_std].apply(fmt)
+        display_cols = ["Dataset"] + methods
+        print(f1_df[display_cols].to_string(index=False))
     
     # Print Time comparison
     print("\n--- Time (seconds, Mean ± Std) ---")
@@ -332,9 +499,23 @@ def print_summary(summary_df):
     
     # Format the summary table
     formatted_df = summary_df.copy()
-    formatted_df["AUC"] = formatted_df["Avg_AUC"].apply(lambda x: f"{x:.3f}") + " ± " + formatted_df["AUC_std"].apply(lambda x: f"{x:.3f}")
-    formatted_df["AUPRC"] = formatted_df["Avg_AUPRC"].apply(lambda x: f"{x:.3f}") + " ± " + formatted_df["AUPRC_std"].apply(lambda x: f"{x:.3f}")
-    formatted_df["Time"] = formatted_df["Avg_Time"].apply(lambda x: f"{x:.2f}") + " ± " + formatted_df["Time_std"].apply(lambda x: f"{x:.2f}")
+    
+    # Format AUC with NaN handling
+    def format_with_std(mean_col, std_col, decimals=3):
+        def formatter(row):
+            mean_val = row[mean_col]
+            std_val = row[std_col]
+            if pd.isna(mean_val) or mean_val is None:
+                return "N/A"
+            if pd.isna(std_val) or std_val is None:
+                std_val = 0.0
+            return f"{mean_val:.{decimals}f} ± {std_val:.{decimals}f}"
+        return formatter
+    
+    formatted_df["AUC"] = formatted_df.apply(format_with_std("Avg_AUC", "AUC_std", 3), axis=1)
+    formatted_df["AUPRC"] = formatted_df.apply(format_with_std("Avg_AUPRC", "AUPRC_std", 3), axis=1)
+    formatted_df["F1"] = formatted_df.apply(format_with_std("Avg_F1", "F1_std", 3), axis=1)
+    formatted_df["Time"] = formatted_df.apply(format_with_std("Avg_Time", "Time_std", 2), axis=1)
     
     # Format new metrics (handle None values)
     def format_metric(mean_col, std_col):
@@ -355,7 +536,7 @@ def print_summary(summary_df):
     formatted_df["SID"] = formatted_df.apply(format_metric("Avg_SID", "SID_std"), axis=1)
     formatted_df["Norm_SID"] = formatted_df.apply(format_metric("Avg_Norm_SID", "Norm_SID_std"), axis=1)
     
-    display_cols = ["Method", "AUC", "AUPRC", "Time", "SHD", "Norm_SHD", "NNZ"]
+    display_cols = ["Method", "AUC", "AUPRC", "F1", "Time", "SHD", "Norm_SHD", "NNZ"]
     if formatted_df["SID"].notna().any():
         display_cols.extend(["SID", "Norm_SID"])
     display_cols.extend(["Total_Samples", "Num_Datasets"])
@@ -366,13 +547,24 @@ def print_summary(summary_df):
     print("BEST PERFORMERS:")
     print("-"*80)
     
-    best_auc_idx = summary_df["Avg_AUC"].idxmax()
-    best_prc_idx = summary_df["Avg_AUPRC"].idxmax()
-    fastest_idx = summary_df["Avg_Time"].idxmin()
+    # Handle NaN values - only find best if there are valid values
+    if summary_df["Avg_AUC"].notna().any():
+        best_auc_idx = summary_df["Avg_AUC"].idxmax()
+        print(f"Best AUC:  {summary_df.loc[best_auc_idx, 'Method']} ({summary_df.loc[best_auc_idx, 'Avg_AUC']:.3f})")
+    else:
+        print("Best AUC:  N/A (no valid data)")
     
-    print(f"Best AUC:  {summary_df.loc[best_auc_idx, 'Method']} ({summary_df.loc[best_auc_idx, 'Avg_AUC']:.3f})")
-    print(f"Best AUPRC: {summary_df.loc[best_prc_idx, 'Method']} ({summary_df.loc[best_prc_idx, 'Avg_AUPRC']:.3f})")
-    print(f"Fastest:   {summary_df.loc[fastest_idx, 'Method']} ({summary_df.loc[fastest_idx, 'Avg_Time']:.2f}s)")
+    if summary_df["Avg_AUPRC"].notna().any():
+        best_prc_idx = summary_df["Avg_AUPRC"].idxmax()
+        print(f"Best AUPRC: {summary_df.loc[best_prc_idx, 'Method']} ({summary_df.loc[best_prc_idx, 'Avg_AUPRC']:.3f})")
+    else:
+        print("Best AUPRC: N/A (no valid data)")
+    
+    if summary_df["Avg_Time"].notna().any():
+        fastest_idx = summary_df["Avg_Time"].idxmin()
+        print(f"Fastest:   {summary_df.loc[fastest_idx, 'Method']} ({summary_df.loc[fastest_idx, 'Avg_Time']:.2f}s)")
+    else:
+        print("Fastest:   N/A (no valid data)")
     
     # Best performers for new metrics (lower is better for SHD/SID)
     if summary_df["Avg_SHD"].notna().any():
@@ -396,6 +588,8 @@ def print_rankings(summary_df):
     summary_df["AUC_Rank"] = summary_df["Avg_AUC"].rank(ascending=False, method="min")
     # Rank by AUPRC (higher is better)
     summary_df["AUPRC_Rank"] = summary_df["Avg_AUPRC"].rank(ascending=False, method="min")
+    # Rank by F1 (higher is better)
+    summary_df["F1_Rank"] = summary_df["Avg_F1"].rank(ascending=False, method="min")
     # Rank by Time (lower is better)
     summary_df["Time_Rank"] = summary_df["Avg_Time"].rank(ascending=True, method="min")
     
@@ -407,7 +601,7 @@ def print_rankings(summary_df):
     if summary_df["Avg_SID"].notna().any():
         summary_df["SID_Rank"] = summary_df["Avg_SID"].rank(ascending=True, method="min")
     
-    ranking_cols = ["Method", "AUC_Rank", "AUPRC_Rank", "Time_Rank"]
+    ranking_cols = ["Method", "AUC_Rank", "AUPRC_Rank", "F1_Rank", "Time_Rank"]
     if "SHD_Rank" in summary_df.columns:
         ranking_cols.append("SHD_Rank")
     if "Norm_SHD_Rank" in summary_df.columns:
