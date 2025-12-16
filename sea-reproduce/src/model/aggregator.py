@@ -170,6 +170,11 @@ class Aggregator(pl.LightningModule):
                 continue
             
             # Try computing metrics with error handling
+            # IMPORTANT: Reset metrics before each graph to avoid stateful accumulation
+            # TorchMetrics are stateful by default and accumulate across calls
+            self.auroc.reset()
+            self.auprc.reset()
+            self.acc.reset()
             try:
                 auroc.append(self.auroc(p, t).item())
                 auprc.append(self.auprc(p, t).item())

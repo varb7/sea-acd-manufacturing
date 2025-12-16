@@ -96,6 +96,10 @@ class CausalBaseline(pl.LightningModule):
         t = torch.cat([t_forward, t_backward], dim=0)
         assert p.shape == t.shape
         # convert prediction to list
+        # IMPORTANT: Reset metrics before computing to avoid stateful accumulation
+        self.auroc.reset()
+        self.auprc.reset()
+        self.acc.reset()
         auroc.append(self.auroc(p, t).item())
         auprc.append(self.auprc(p, t).item())
         acc.append(self.acc(p, t).item())
