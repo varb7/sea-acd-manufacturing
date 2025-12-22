@@ -577,6 +577,10 @@ def run_pc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, col
             output_format=output_format
         )
         
+        # If PAG format, convert PyTetrad semantic format to causal-learn endpoint format
+        if output_format == "pag":
+            adj = convert_pytetrad_pag_to_causallearn(adj)
+        
         return adj.astype(int)
     except Exception as e:
         print(f"PC failed for batch: {e}")
@@ -621,6 +625,10 @@ def run_cpc(batch, alpha=0.05, depth=-1, include_undirected=True, prior=None, co
             prior=prior,
             output_format=output_format
         )
+        
+        # If PAG format, convert PyTetrad semantic format to causal-learn endpoint format
+        if output_format == "pag":
+            adj = convert_pytetrad_pag_to_causallearn(adj)
         
         return adj.astype(int)
     except Exception as e:
