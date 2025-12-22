@@ -57,18 +57,21 @@ class DataModule(pl.LightningDataModule):
                                   num_workers=self.num_workers,
                                   shuffle=True,
                                   pin_memory=True,
-                                  persistent_workers=(not self.args.debug),
+                                  # persistent_workers requires num_workers > 0
+                                  persistent_workers=(self.num_workers > 0 and not self.args.debug),
                                   collate_fn=partial(collate, self.args))
         return train_loader
 
     def val_dataloader(self):
         # batch_size smaller since we sample more batches on average
+        val_num_workers = max(self.num_workers // 4, 1) if self.num_workers > 0 else 0
         val_loader = DataLoader(self.subset_val,
                                 batch_size=max(self.batch_size // 4, 1),
-                                num_workers=max(self.num_workers // 4, 1),
+                                num_workers=val_num_workers,
                                 shuffle=False,
                                 pin_memory=True,
-                                persistent_workers=(not self.args.debug),
+                                # persistent_workers requires num_workers > 0
+                                persistent_workers=(val_num_workers > 0 and not self.args.debug),
                                 collate_fn=partial(collate, self.args))
         return val_loader
 

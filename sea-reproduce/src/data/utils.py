@@ -84,14 +84,7 @@ edge_map_fci = {
     (3, 3): 4,  # (1, 1)
     (3, 4): 5,  # (1, 2)
     (4, 3): 6,  # (2, 1)
-    (4, 4): 7,  # (2, 2)
-    # Additional mappings for RFCI compatibility
-    (4, 1): 6,  # (2, -1) -> treat as (2, 1)
-    (1, 4): 2,  # (-1, 2) -> treat as (-1, 1)
-    (4, 2): 7,  # (2, 0) -> treat as (2, 2)
-    (2, 4): 7,  # (0, 2) -> treat as (2, 2)
-    (1, 2): 2,  # (-1, 0) -> treat as (-1, 1)
-    (2, 1): 3,  # (0, -1) -> treat as (1, -1)
+    (4, 4): 7   # (2, 2)
 }
 
 
@@ -112,19 +105,80 @@ edge_map_gies = {
     (2, 2): 4,  # (1, 1) not DAG but exists (?)
 }
 
-# Edge mapping for RFCI PAG format (compatible with FCI)
-# In sea-reproduce/src/data/utils.py
-edge_map_rfci_pag = {
-    # 0-based indexing to match embedding layer
-    (0, 0): 0,  # no edge (unpadded)
-    (1, 1): 1,  # undirected edge (-)
-    (2, 0): 2,  # forward edge (->)
-    (0, 2): 3,  # backward edge (<-)
-    (4, 4): 4,  # ambiguous edge (<->)
-    (2, 2): 5,  # bidirectional
-    (4, 0): 6,  # partial forward
-    (0, 4): 7,  # partial backward
-}
+
+def convert_pytetrad_pag_to_causallearn(adj):
+    """
+    Convert PyTetrad PAG format to causal-learn PAG format.
+    
+    PyTetrad uses semantic edge encoding:
+        -1 = backward edge (<-)
+         0 = no edge
+         1 = undirected edge (-)
+         2 = forward edge (->)
+    
+    causal-learn uses endpoint marker encoding:
+        -1 = tail (-)
+         0 = no edge
+         1 = arrowhead (>)
+         2 = circle (o)
+    
+    This conversion ensures PyTetrad outputs are compatible with the original
+    edge_map_fci which expects causal-learn format.
+    
+    Args:
+        adj: Adjacency matrix in PyTetrad format (n_vars, n_vars)
+    
+    Returns:
+        Adjacency matrix in causal-learn format (n_vars, n_vars)
+    """
+    n = adj.shape[0]
+    adj_cl = np.zeros((n, n), dtype=int)
+    
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            
+            ij = adj[i, j]
+            ji = adj[j, i]
+            
+            # No edge: both are 0
+            if ij == 0 and ji == 0:
+                adj_cl[i, j] = 0
+                adj_cl[j, i] = 0
+            
+            # Directed edge i→j: PyTetrad (2, -1)
+            # Convert to causal-learn: tail at i (-1), arrow at j (1)
+            elif ij == 2 and ji == -1:
+                adj_cl[i, j] = -1  # tail at j from i's perspective
+                adj_cl[j, i] = 1   # arrow at i from j's perspective
+            
+            # Directed edge i←j: PyTetrad (-1, 2)
+            # Convert to causal-learn: arrow at i (1), tail at j (-1)
+            elif ij == -1 and ji == 2:
+                adj_cl[i, j] = 1   # arrow at j from i's perspective
+                adj_cl[j, i] = -1  # tail at i from j's perspective
+            
+            # Undirected edge i-j: PyTetrad (1, 1)
+            # Convert to causal-learn: tail-tail (-1, -1)
+            elif ij == 1 and ji == 1:
+                adj_cl[i, j] = -1
+                adj_cl[j, i] = -1
+            
+            # Bidirected edge i↔j: PyTetrad would be (2, 2) if it occurs
+            # Convert to causal-learn: arrow-arrow (1, 1)
+            elif ij == 2 and ji == 2:
+                adj_cl[i, j] = 1
+                adj_cl[j, i] = 1
+            
+            # Edge cases: partial orientations or mixed types
+            # These shouldn't occur in standard PyTetrad output, but handle gracefully
+            else:
+                # Default: preserve as-is (might need adjustment based on actual data)
+                adj_cl[i, j] = ij
+                adj_cl[j, i] = ji
+    
+    return adj_cl
 
 def convert_to_item(dataset, feats, graphs, orders):
     """
@@ -289,6 +343,10 @@ def run_rfci(batch, alpha=0.05, depth=-1, include_undirected=True, count_partial
             prior=prior
         )
         
+        # Convert PyTetrad PAG format to causal-learn PAG format
+        # This ensures compatibility with the original edge_map_fci
+        adj = convert_pytetrad_pag_to_causallearn(adj)
+        
         # Ensure int np.ndarray
         return adj.astype(int)
     except Exception as e:
@@ -370,7 +428,7 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, c
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module now returns FCI-compatible format {-1, 0, 1, 2} directly
+        # Module returns PyTetrad PAG format {-1, 0, 1, 2}
         adj_fci = tetrad_run_cfci(
             batch,
             columns=columns,
@@ -379,6 +437,9 @@ def run_cfci(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None, c
             include_undirected=include_undirected,
             prior=prior
         )
+        
+        # Convert PyTetrad PAG format to causal-learn PAG format
+        adj_fci = convert_pytetrad_pag_to_causallearn(adj_fci)
         
         return adj_fci.astype(int)
     except Exception as e:
@@ -411,7 +472,7 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module now returns FCI-compatible format {-1, 0, 1, 2} directly
+        # Module returns PyTetrad PAG format {-1, 0, 1, 2}
         adj_fci = tetrad_run_fci_max(
             batch,
             columns=columns,
@@ -420,6 +481,9 @@ def run_fci_max(batch, alpha=0.01, depth=-1, include_undirected=True, prior=None
             include_undirected=include_undirected,
             prior=prior
         )
+        
+        # Convert PyTetrad PAG format to causal-learn PAG format
+        adj_fci = convert_pytetrad_pag_to_causallearn(adj_fci)
         
         return adj_fci.astype(int)
     except Exception as e:
@@ -453,7 +517,7 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module now returns FCI-compatible format {-1, 0, 1, 2} directly
+        # Module returns PyTetrad PAG format {-1, 0, 1, 2}
         adj_fci = tetrad_run_gfci(
             batch,
             columns=columns,
@@ -463,6 +527,9 @@ def run_gfci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undirect
             include_undirected=include_undirected,
             prior=prior
         )
+        
+        # Convert PyTetrad PAG format to causal-learn PAG format
+        adj_fci = convert_pytetrad_pag_to_causallearn(adj_fci)
         
         return adj_fci.astype(int)
     except Exception as e:
@@ -589,7 +656,7 @@ def run_boss_fci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undi
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module returns FCI-compatible format {-1, 0, 1, 2} directly
+        # Module returns PyTetrad PAG format {-1, 0, 1, 2}
         adj_fci = tetrad_run_boss_fci(
             batch,
             columns=columns,
@@ -599,6 +666,9 @@ def run_boss_fci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_undi
             include_undirected=include_undirected,
             prior=prior
         )
+        
+        # Convert PyTetrad PAG format to causal-learn PAG format
+        adj_fci = convert_pytetrad_pag_to_causallearn(adj_fci)
         
         return adj_fci.astype(int)
     except Exception as e:
@@ -635,7 +705,7 @@ def run_grasp_fci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_und
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module returns FCI-compatible format {-1, 0, 1, 2} directly
+        # Module returns PyTetrad PAG format {-1, 0, 1, 2}
         adj_fci = tetrad_run_grasp_fci(
             batch,
             columns=columns,
@@ -645,6 +715,9 @@ def run_grasp_fci(batch, alpha=0.01, depth=-1, penalty_discount=2.0, include_und
             include_undirected=include_undirected,
             prior=prior
         )
+        
+        # Convert PyTetrad PAG format to causal-learn PAG format
+        adj_fci = convert_pytetrad_pag_to_causallearn(adj_fci)
         
         return adj_fci.astype(int)
     except Exception as e:
@@ -681,7 +754,7 @@ def run_tetrad_fci(batch, alpha=0.01, depth=-1, max_path_length=-1, include_undi
         if columns is None:
             columns = [f"v{i}" for i in range(k)]
         
-        # Module returns FCI-compatible format {-1, 0, 1, 2} directly
+        # Module returns PyTetrad PAG format {-1, 0, 1, 2}
         adj_fci = tetrad_run_tetrad_fci(
             batch,
             columns=columns,
@@ -691,6 +764,9 @@ def run_tetrad_fci(batch, alpha=0.01, depth=-1, max_path_length=-1, include_undi
             include_undirected=include_undirected,
             prior=prior
         )
+        
+        # Convert PyTetrad PAG format to causal-learn PAG format
+        adj_fci = convert_pytetrad_pag_to_causallearn(adj_fci)
         
         return adj_fci.astype(int)
     except Exception as e:

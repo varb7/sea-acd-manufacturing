@@ -15,6 +15,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import RichProgressBar
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.strategies import DDPStrategy
 
 from args import parse_args
 from data import DataModule
@@ -119,7 +120,10 @@ def main():
         # GPU utilization
         "devices": device_ids,
         "accelerator": "gpu",
-        "strategy": "ddp"
+        # Strategy selection based on number of GPUs:
+        # - Single GPU (NUM_GPU=1): Use 'auto' for optimal performance (no DDP overhead)
+        # - Multi-GPU (NUM_GPU>1): Use DDPStrategy with find_unused_parameters for frozen layers
+        "strategy": "auto" if args.num_gpu == 1 else DDPStrategy(find_unused_parameters=True)
         #"precision": 16,  # doesn't work well with gies?
     }
 
