@@ -279,6 +279,23 @@ class Aggregator(pl.LightningModule):
             return None
 
     def configure_optimizers(self):
+        # Freeze embeddings and first 2 transformer layers for low-data fine-tuning
+        freeze_patterns = [
+            'embed_tokens', 'embed_nodes', 'embed_edges', 'embed_time', 'embed_feats',
+            'layers.0', 'layers.1'  # First 2 of 4 transformer blocks
+        ]
+        
+        frozen_count = 0
+        trainable_count = 0
+        for name, param in self.encoder.named_parameters():
+            if any(pattern in name for pattern in freeze_patterns):
+                param.requires_grad = False
+                frozen_count += 1
+            else:
+                trainable_count += 1
+        
+        print(f"[FREEZE] Frozen {frozen_count} params, Training {trainable_count} params")
+        
         param_groups = get_params_groups(self, self.args)
         optimizer = AdamW(param_groups)
         # scheduler makes everything worse =__=
