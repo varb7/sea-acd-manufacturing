@@ -137,7 +137,24 @@ def main():
     # if applicable, restore full training
     fit_kwargs = {}
     if os.path.exists(args.checkpoint_path):
-        fit_kwargs["ckpt_path"] = args.checkpoint_path
+        # For fine-tuning with freezing: load model weights ONLY (not optimizer state)
+        # Using ckpt_path would try to restore optimizer, which fails when freezing changes param count
+        printt(f"Loading pretrained weights from: {args.checkpoint_path}")
+        checkpoint = torch.load(args.checkpoint_path, map_location="cpu")
+        
+        # Handle different checkpoint formats
+        state_dict = checkpoint.get("state_dict", checkpoint)
+        
+        # Load weights with strict=False to ignore missing/extra keys
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        if missing:
+            printt(f"  Missing keys (expected if architecture differs): {len(missing)}")
+        if unexpected:
+            printt(f"  Unexpected keys (ignored): {len(unexpected)}")
+        printt("Loaded pretrained weights successfully (optimizer state NOT restored for fine-tuning)")
+        
+        # Do NOT pass ckpt_path to trainer.fit - this would try to restore optimizer
+        # fit_kwargs["ckpt_path"] = args.checkpoint_path  # Commented out for fine-tuning
     trainer.fit(model, data, **fit_kwargs)
 
     # FREEZE MODEL
