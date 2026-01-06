@@ -28,6 +28,7 @@ from torchmetrics.classification import (
 
 from .axial import AxialTransformer, TopLayer
 from .utils import get_params_groups
+from .metrics import compute_edge_existence_metrics, compute_directed_edge_set_f1
 
 
 class Aggregator(pl.LightningModule):
@@ -166,17 +167,8 @@ class Aggregator(pl.LightningModule):
         # do not reduce over batch
         pred, true = self.symmetrize(output, batch, reduce=False)
         for i, (p, t) in enumerate(zip(pred, true)):
-            # Apply temperature scaling to improve probability calibration
-            # Temperature > 1 makes probabilities less confident (better calibration)
-            # Default temperature = 1.0 (no scaling)
             temperature = getattr(self.args, 'temperature', 1.0)
-            
-            # select P(forward) and P(backward), remove P(no edge)
-            # corresponding to dim=1, dim=2, and dim=0
-            p = F.softmax(p / temperature, dim=-1)[:,1:].t().reshape(-1)  # (T,)
-            p = p.cpu()
-            t = t.cpu()
-            assert p.shape == t.shape
+            use_edge_set = getattr(self.args, 'use_edge_set_f1', False)
             
             # Check if tensors are empty (no valid edges after filtering)
             if p.numel() == 0 or t.numel() == 0:
@@ -191,29 +183,67 @@ class Aggregator(pl.LightningModule):
                     true_list.append([])
                 continue
             
-            # Try computing metrics with error handling
-            # IMPORTANT: Reset metrics before each graph to avoid stateful accumulation
-            # TorchMetrics are stateful by default and accumulate across calls
-            self.auroc.reset()
-            self.auprc.reset()
-            self.acc.reset()
-            self.f1.reset()
             try:
-                auroc.append(self.auroc(p, t).item())
-                auprc.append(self.auprc(p, t).item())
-                acc.append(self.acc(p, t).item())
-                # Use fixed threshold=0.5 (calibrated via temperature scaling)
-                f1.append(self.f1(p, t).item())
+                if use_edge_set:
+                    # NEW: Correct edge-set based metrics (guide's Eq. 26)
+                    # p shape: [N, 3] logits [z_no_edge, z_forward, z_backward]
+                    # t shape: [N] labels {0, 1, 2}
+                    
+                    # Compute edge existence metrics (AUROC/AUPRC)
+                    auroc_val, auprc_val = compute_edge_existence_metrics(p, t, temperature)
+                    auroc.append(auroc_val.item())
+                    auprc.append(auprc_val.item())
+                    
+                    # Compute directed edge-set F1
+                    f1_val, prec, rec, nnz_val = compute_directed_edge_set_f1(p, t, 0.5, temperature)
+                    f1.append(f1_val)
+                    acc.append(prec)  # Store precision in acc field
+                    
+                    if save_preds:
+                        # Save edge existence probabilities for structural metrics
+                        probs = F.softmax(p / temperature, dim=-1)
+                        p_edge = probs[:, 1] + probs[:, 2]  # Edge existence score
+                        t_edge = (t > 0).float()  # Binary: edge exists or not
+                        pred_list.append(p_edge.cpu().tolist())
+                        true_list.append(t_edge.cpu().tolist())
+                else:
+                    # OLD: Legacy metrics (backward compatible)
+                    # Apply temperature scaling to improve probability calibration
+                    # Temperature > 1 makes probabilities less confident (better calibration)
+                    
+                    # select P(forward) and P(backward), remove P(no edge)
+                    # corresponding to dim=1, dim=2, and dim=0
+                    p_legacy = F.softmax(p / temperature, dim=-1)[:,1:].t().reshape(-1)  # (T,)
+                    p_legacy = p_legacy.cpu()
+                    t_cpu = t.cpu()
+                    assert p_legacy.shape == t_cpu.shape
+                    
+                    # Reset metrics before each graph to avoid stateful accumulation
+                    self.auroc.reset()
+                    self.auprc.reset()
+                    self.acc.reset()
+                    self.f1.reset()
+                    
+                    auroc.append(self.auroc(p_legacy, t_cpu).item())
+                    auprc.append(self.auprc(p_legacy, t_cpu).item())
+                    acc.append(self.acc(p_legacy, t_cpu).item())
+                    # Use fixed threshold=0.5 (calibrated via temperature scaling)
+                    f1.append(self.f1(p_legacy, t_cpu).item())
+                    
+                    if save_preds:
+                        pred_list.append(p_legacy.tolist())
+                        true_list.append(t_cpu.tolist())
+                        
             except (IndexError, RuntimeError, ValueError) as e:
                 print(f"WARNING: Metric computation failed for graph {i}: {e}")
                 auroc.append(float('nan'))
                 auprc.append(float('nan'))
                 acc.append(float('nan'))
                 f1.append(float('nan'))
-            
-            if save_preds:
-                pred_list.append(p.tolist())
-                true_list.append(t.tolist())
+                if save_preds:
+                    pred_list.append([])
+                    true_list.append([])
+
 
         outputs = {}
         outputs["auroc"] = auroc

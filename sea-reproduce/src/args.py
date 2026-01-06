@@ -165,6 +165,12 @@ def get_parser():
     parser.add_argument("--weight_decay",
                         type=float, default=1e-6,
                         help="L2 regularization weight")
+    
+    # ==== probability calibration ====
+    parser.add_argument("--temperature",
+                        type=float, default=1.0,
+                        help="Temperature scaling for softmax calibration (T>1 = less confident, T<1 = more confident)")
+    
     return parser
 
 
