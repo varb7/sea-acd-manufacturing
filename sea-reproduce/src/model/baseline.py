@@ -29,7 +29,8 @@ class CausalBaseline(pl.LightningModule):
         self.auroc = BinaryAUROC()
         self.auprc = BinaryAveragePrecision()
         self.acc = BinaryAccuracy()
-        self.f1 = BinaryF1Score()
+        # Use optimized threshold instead of default 0.5 for better F1 calibration
+        self.f1 = BinaryF1Score(thresholds=100)  # Auto-optimize over 100 thresholds
 
         self.save_hyperparameters()
 

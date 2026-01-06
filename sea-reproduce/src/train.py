@@ -140,7 +140,7 @@ def main():
         # For fine-tuning with freezing: load model weights ONLY (not optimizer state)
         # Using ckpt_path would try to restore optimizer, which fails when freezing changes param count
         printt(f"Loading pretrained weights from: {args.checkpoint_path}")
-        checkpoint = torch.load(args.checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(args.checkpoint_path, map_location="cpu", weights_only=False)
         
         # Handle different checkpoint formats
         state_dict = checkpoint.get("state_dict", checkpoint)
@@ -176,7 +176,8 @@ def main():
                         logger=False,
                         accelerator="gpu")
 
-    model = model.load_from_checkpoint(best_path)
+    # load_from_checkpoint must be called on CLASS, not instance
+    model = type(model).load_from_checkpoint(best_path)
     results = tester.predict(model, data)
     # post-process results for dispatcher
     results_dict = defaultdict(list)

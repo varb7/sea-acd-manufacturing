@@ -50,7 +50,9 @@ class Aggregator(pl.LightningModule):
         self.auroc = BinaryAUROC()
         self.auprc = BinaryAveragePrecision()
         self.acc = BinaryAccuracy()
-        self.f1 = BinaryF1Score()
+        # Use optimized threshold instead of default 0.5 since our probabilities
+        # come from a 3-class softmax with P(no_edge) removed, not true binary probs
+        self.f1 = BinaryF1Score(thresholds=100)  # Auto-optimize over 100 thresholds
 
         self.save_hyperparameters()
 
@@ -119,6 +121,15 @@ class Aggregator(pl.LightningModule):
 
         # get label corresponding to same entries
         label = batch["label"]
+        
+        # Handle dimension mismatch: crop label to match output size
+        # This can happen when padding/processing creates different sizes
+        output_size = forward_mask.shape[1]  # Get the N dimension from mask [B, N, N]
+        label_size = label.shape[1]
+        if output_size != label_size:
+            # Crop label to match output size
+            label = label[:, :output_size, :output_size]
+        
         forward_label = torch.triu(label, 1)
         backward_label = torch.triu(label.transpose(1, 2), 1)
         if reduce:
@@ -280,21 +291,21 @@ class Aggregator(pl.LightningModule):
 
     def configure_optimizers(self):
         # Freeze embeddings and first 2 transformer layers for low-data fine-tuning
-        freeze_patterns = [
-            'embed_tokens', 'embed_nodes', 'embed_edges', 'embed_time', 'embed_feats',
-            'layers.0', 'layers.1'  # First 2 of 4 transformer blocks
-        ]
+        #freeze_patterns = [
+        #    'embed_tokens', 'embed_nodes', 'embed_edges', 'embed_time', 'embed_feats',
+        #    'layers.0', 'layers.1'  # First 2 of 4 transformer blocks
+        #]
         
-        frozen_count = 0
-        trainable_count = 0
-        for name, param in self.encoder.named_parameters():
-            if any(pattern in name for pattern in freeze_patterns):
-                param.requires_grad = False
-                frozen_count += 1
-            else:
-                trainable_count += 1
+        #frozen_count = 0
+        #trainable_count = 0
+        #for name, param in self.encoder.named_parameters():
+        #    if any(pattern in name for pattern in freeze_patterns):
+        #        param.requires_grad = False
+        #        frozen_count += 1
+        #    else:
+        #        trainable_count += 1
         
-        print(f"[FREEZE] Frozen {frozen_count} params, Training {trainable_count} params")
+        #print(f"[FREEZE] Frozen {frozen_count} params, Training {trainable_count} params")
         
         param_groups = get_params_groups(self, self.args)
         optimizer = AdamW(param_groups)
