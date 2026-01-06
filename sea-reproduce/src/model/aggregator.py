@@ -50,9 +50,9 @@ class Aggregator(pl.LightningModule):
         self.auroc = BinaryAUROC()
         self.auprc = BinaryAveragePrecision()
         self.acc = BinaryAccuracy()
-        # Use optimized threshold instead of default 0.5 since our probabilities
-        # come from a 3-class softmax with P(no_edge) removed, not true binary probs
-        self.f1 = BinaryF1Score(thresholds=100)  # Auto-optimize over 100 thresholds
+        # Fixed threshold=0.5 for directed edge-based F1 (matches guide's formula)
+        # Use temperature scaling to improve probability calibration instead
+        self.f1 = BinaryF1Score(threshold=0.5)
 
         self.save_hyperparameters()
 
@@ -166,9 +166,14 @@ class Aggregator(pl.LightningModule):
         # do not reduce over batch
         pred, true = self.symmetrize(output, batch, reduce=False)
         for i, (p, t) in enumerate(zip(pred, true)):
+            # Apply temperature scaling to improve probability calibration
+            # Temperature > 1 makes probabilities less confident (better calibration)
+            # Default temperature = 1.0 (no scaling)
+            temperature = getattr(self.args, 'temperature', 1.0)
+            
             # select P(forward) and P(backward), remove P(no edge)
             # corresponding to dim=1, dim=2, and dim=0
-            p = F.softmax(p, dim=-1)[:,1:].t().reshape(-1)  # (T,)
+            p = F.softmax(p / temperature, dim=-1)[:,1:].t().reshape(-1)  # (T,)
             p = p.cpu()
             t = t.cpu()
             assert p.shape == t.shape
@@ -180,6 +185,7 @@ class Aggregator(pl.LightningModule):
                 auroc.append(float('nan'))
                 auprc.append(float('nan'))
                 acc.append(float('nan'))
+                f1.append(float('nan'))
                 if save_preds:
                     pred_list.append([])
                     true_list.append([])
@@ -191,10 +197,12 @@ class Aggregator(pl.LightningModule):
             self.auroc.reset()
             self.auprc.reset()
             self.acc.reset()
+            self.f1.reset()
             try:
                 auroc.append(self.auroc(p, t).item())
                 auprc.append(self.auprc(p, t).item())
                 acc.append(self.acc(p, t).item())
+                # Use fixed threshold=0.5 (calibrated via temperature scaling)
                 f1.append(self.f1(p, t).item())
             except (IndexError, RuntimeError, ValueError) as e:
                 print(f"WARNING: Metric computation failed for graph {i}: {e}")
