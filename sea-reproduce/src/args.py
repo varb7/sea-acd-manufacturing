@@ -174,7 +174,21 @@ def get_parser():
     # ==== metric mode ====
     parser.add_argument("--use_edge_set_f1",
                         action="store_true",
-                        help="Use correct edge-set based F1 (guide's Eq. 26) instead of legacy metrics")
+                        default=True,
+                        help="Use correct edge-set based F1 (guide's Eq. 26) instead of legacy metrics (default: True)")
+    parser.add_argument("--no-use_edge_set_f1",
+                        dest="use_edge_set_f1",
+                        action="store_false",
+                        help="Disable edge-set F1, use legacy metrics instead")
+    
+    # ==== edge selection policy ====
+    parser.add_argument("--edge_select_mode",
+                        type=str, default="threshold",
+                        choices=["threshold", "oracle_k"],
+                        help="Edge selection mode: 'threshold' (p_edge >= tau) or 'oracle_k' (top-k where k=|E*|)")
+    parser.add_argument("--edge_threshold",
+                        type=float, default=0.5,
+                        help="Threshold for edge selection (only used in threshold mode, default=0.5)")
     
     return parser
 

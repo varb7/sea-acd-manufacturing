@@ -212,16 +212,27 @@ def main():
         if i < len(pred):
             key_to_metrics[key]["pred"].append(pred[i])
         
-        # Compute structural metrics from predictions and ground truth
-        # Use pre-computed edge-set metrics from aggregator if available (ensures F1/SHD consistency)
+        # Use pre-computed edge-set metrics from aggregator (ensures F1/SHD consistency)
         if "shd" in results_dict and i < len(results_dict["shd"]):
             key_to_metrics[key]["shd"].append(results_dict["shd"][i])
         if "normalized_shd" in results_dict and i < len(results_dict["normalized_shd"]):
             key_to_metrics[key]["normalized_shd"].append(results_dict["normalized_shd"][i])
         if "nnz" in results_dict and i < len(results_dict["nnz"]):
             key_to_metrics[key]["nnz"].append(results_dict["nnz"][i])
+        # New debug metrics
+        if "m_true" in results_dict and i < len(results_dict["m_true"]):
+            key_to_metrics[key]["m_true"].append(results_dict["m_true"][i])
+        if "tp" in results_dict and i < len(results_dict["tp"]):
+            key_to_metrics[key]["tp"].append(results_dict["tp"][i])
+        if "fp" in results_dict and i < len(results_dict["fp"]):
+            key_to_metrics[key]["fp"].append(results_dict["fp"][i])
+        if "fn" in results_dict and i < len(results_dict["fn"]):
+            key_to_metrics[key]["fn"].append(results_dict["fn"][i])
+        if "precision" in results_dict and i < len(results_dict["precision"]):
+            key_to_metrics[key]["precision"].append(results_dict["precision"][i])
+        
         # Fallback: compute from pred/true if edge-set metrics not available (legacy mode)
-        elif i < len(pred) and i < len(true) and pred[i] and true[i]:
+        if "shd" not in results_dict and i < len(pred) and i < len(true) and pred[i] and true[i]:
             shd, norm_shd, nnz, sid, norm_sid = compute_structural_metrics(
                 pred[i], true[i]
             )

@@ -28,9 +28,7 @@ from torchmetrics.classification import (
 
 from .axial import AxialTransformer, TopLayer
 from .utils import get_params_groups
-from .metrics import (compute_edge_existence_metrics, 
-                      compute_directed_edge_set_f1,
-                      compute_directed_edge_set_shd)
+from .metrics import compute_all_edge_metrics
 
 
 class Aggregator(pl.LightningModule):
@@ -195,59 +193,43 @@ class Aggregator(pl.LightningModule):
             
             try:
                 if use_edge_set:
-                    # NEW: Correct edge-set based metrics (guide's Eq. 26)
+                    # NEW: Use unified edge metrics with configurable selection mode
                     # p shape: [N, 3] logits [z_no_edge, z_forward, z_backward]
                     # t shape: [N] labels {0, 1, 2}
                     
-                    # Compute edge existence metrics (AUROC/AUPRC)
-                    auroc_val, auprc_val = compute_edge_existence_metrics(p, t, temperature)
-                    auroc.append(auroc_val.item())
-                    auprc.append(auprc_val.item())
+                    temperature = getattr(self.args, 'temperature', 1.0)
+                    edge_select_mode = getattr(self.args, 'edge_select_mode', 'threshold')
+                    edge_threshold = getattr(self.args, 'edge_threshold', 0.5)
                     
-                    # Compute directed edge-set F1
-                    f1_val, prec, rec, nnz_val = compute_directed_edge_set_f1(p, t, 0.5, temperature)
-                    f1.append(f1_val)
-                    acc.append(rec)  # Store recall in acc field for edge-set mode
+                    # Compute all metrics in one call
+                    metrics = compute_all_edge_metrics(
+                        p, t, 
+                        temperature=temperature,
+                        edge_select_mode=edge_select_mode,
+                        edge_threshold=edge_threshold
+                    )
                     
-                    # Compute SHD on same directed edge sets (aligns with F1)
-                    shd_val, norm_shd_val = compute_directed_edge_set_shd(p, t, 0.5, temperature)
+                    # Extract metrics
+                    auroc.append(metrics['auroc'])
+                    auprc.append(metrics['auprc'])
+                    f1.append(metrics['f1'])
+                    acc.append(metrics['recall'])  # Store recall in acc field
                     
                     if save_preds:
-                        # Save directed edge predictions for SHD calculation
-                        # Build binary vectors for directed edges to match legacy format
-                        probs = F.softmax(p / temperature, dim=-1)
-                        p_edge = probs[:, 1] + probs[:, 2]
-                        edge_exists = p_edge >= 0.5
-                        direction = torch.argmax(probs[:, 1:], dim=1)
+                        # Store metrics for debugging
+                        batch.setdefault('shd', []).append(metrics['shd'])
+                        batch.setdefault('normalized_shd', []).append(metrics['normalized_shd'])
+                        batch.setdefault('nnz', []).append(metrics['nnz_pred'])
+                        batch.setdefault('m_true', []).append(metrics['m_true'])
+                        batch.setdefault('tp', []).append(metrics['tp'])
+                        batch.setdefault('fp', []).append(metrics['fp'])
+                        batch.setdefault('fn', []).append(metrics['fn'])
+                        batch.setdefault('precision', []).append(metrics['precision'])
                         
-                        # Create directed edge vectors [forward_1, backward_1, forward_2, backward_2, ...]
-                        pred_directed = []
-                        true_directed = []
-                        
-                        for idx in range(len(p)):
-                            # Forward edge
-                            if edge_exists[idx] and direction[idx] == 0:
-                                pred_directed.extend([1.0, 0.0])  # Predict forward
-                            elif edge_exists[idx] and direction[idx] == 1:
-                                pred_directed.extend([0.0, 1.0])  # Predict backward
-                            else:
-                                pred_directed.extend([0.0, 0.0])  # No edge
-                            
-                            # True labels
-                            if t[idx] == 1:  # True forward
-                                true_directed.extend([1.0, 0.0])
-                            elif t[idx] == 2:  # True backward
-                                true_directed.extend([0.0, 1.0])
-                            else:  # No edge
-                                true_directed.extend([0.0, 0.0])
-                        
-                        pred_list.append(pred_directed)
-                        true_list.append(true_directed)
-                        
-                        # Also store SHD computed here for this graph
-                        batch.setdefault('shd', []).append(shd_val)
-                        batch.setdefault('normalized_shd', []).append(norm_shd_val)
-                        batch.setdefault('nnz', []).append(nnz_val)
+                        # Build pred/true lists for compatibility
+                        # Store raw logits and labels instead of complex transformation
+                        pred_list.append(p.cpu().tolist())
+                        true_list.append(t.cpu().tolist())
                 else:
                     # OLD: Legacy metrics (backward compatible)
                     # Apply temperature scaling to improve probability calibration
@@ -304,6 +286,17 @@ class Aggregator(pl.LightningModule):
             outputs["normalized_shd"] = batch["normalized_shd"]
         if "nnz" in batch:
             outputs["nnz"] = batch["nnz"]
+        # Include new debug metrics
+        if "m_true" in batch:
+            outputs["m_true"] = batch["m_true"]
+        if "tp" in batch:
+            outputs["tp"] = batch["tp"]
+        if "fp" in batch:
+            outputs["fp"] = batch["fp"]
+        if "fn" in batch:
+            outputs["fn"] = batch["fn"]
+        if "precision" in batch:
+            outputs["precision"] = batch["precision"]
         return outputs
 
     def training_step(self, batch, batch_idx):

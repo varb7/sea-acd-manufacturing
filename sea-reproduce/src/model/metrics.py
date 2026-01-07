@@ -5,6 +5,11 @@ Implements the guide's edge-set based F1 formula (Equation 26):
 - Separates edge existence from edge direction
 - Builds explicit directed edge sets Ê and E*
 - Computes set-based precision, recall, and F1
+
+Enhanced with:
+- Oracle Top-K edge selection (k = number of true edges)
+- Threshold-based edge selection
+- Clean pair-state SHD computation
 """
 
 import torch
@@ -12,30 +17,201 @@ import torch.nn.functional as F
 from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 
 
-def compute_edge_existence_metrics(probs, labels, temperature=1.0):
+# =============================================================================
+# B1. Compute probabilities and existence scores
+# =============================================================================
+
+def compute_edge_probs(logits, temperature=1.0):
     """
-    Compute AUROC/AUPRC on edge existence (not direction).
-    
-    This separates "does an edge exist?" from "what is the direction?",
-    which is the correct way to evaluate edge detection performance.
+    Compute edge probabilities and direction predictions from logits.
     
     Args:
-        probs: [N, 3] tensor with logits [z_no_edge, z_forward, z_backward]
-        labels: [N] tensor with values {0=no_edge, 1=forward, 2=backward}
+        logits: [N, 3] tensor with logits [z_no_edge, z_forward, z_backward]
         temperature: Temperature scaling factor (T>1 = less confident)
+    
+    Returns:
+        probs: [N, 3] softmax probabilities
+        p_edge: [N] edge existence probability = P(forward) + P(backward)
+        dir_pred: [N] predicted direction {1=forward, 2=backward} (matches label scheme)
+    """
+    # Apply temperature scaling and softmax
+    probs = F.softmax(logits / temperature, dim=-1)
+    
+    # Edge existence probability: P(edge) = P(forward) + P(backward)
+    p_edge = probs[:, 1] + probs[:, 2]
+    
+    # Predicted direction: 1 + argmax(P(forward), P(backward))
+    # argmax returns 0 for forward, 1 for backward
+    # Adding 1 gives us {1=forward, 2=backward} matching label scheme
+    dir_pred = 1 + torch.argmax(probs[:, 1:], dim=1)
+    
+    return probs, p_edge, dir_pred
+
+
+# =============================================================================
+# B2. Edge selection policy
+# =============================================================================
+
+def select_edges(p_edge, labels, mode="threshold", threshold=0.5):
+    """
+    Select which edges to predict based on selection policy.
+    
+    Args:
+        p_edge: [N] edge existence probabilities
+        labels: [N] true labels {0=no_edge, 1=forward, 2=backward}
+        mode: "threshold" or "oracle_k"
+        threshold: threshold for edge selection (only used in threshold mode)
+    
+    Returns:
+        selected_idx: indices of selected edges
+        k: number of edges selected (for logging)
+    """
+    if mode == "oracle_k":
+        # Oracle mode: select top-k edges where k = number of true edges
+        k = (labels > 0).sum().item()
+        if k == 0:
+            # No true edges - return empty selection
+            selected_idx = torch.tensor([], dtype=torch.long, device=p_edge.device)
+        else:
+            # Select top k edges by probability
+            _, topk_idx = torch.topk(p_edge, k=min(k, len(p_edge)))
+            selected_idx = topk_idx
+    elif mode == "threshold":
+        # Threshold mode: select edges with p_edge >= threshold
+        selected_idx = torch.where(p_edge >= threshold)[0]
+        k = len(selected_idx)
+    else:
+        raise ValueError(f"Unknown edge selection mode: {mode}")
+    
+    return selected_idx, k
+
+
+# =============================================================================
+# B3. Build directed edge sets
+# =============================================================================
+
+def build_edge_sets(selected_idx, dir_pred, labels):
+    """
+    Build predicted and true directed edge sets.
+    
+    Args:
+        selected_idx: indices of selected edges
+        dir_pred: [N] predicted direction {1=forward, 2=backward}
+        labels: [N] true labels {0=no_edge, 1=forward, 2=backward}
+    
+    Returns:
+        E_hat: set of (idx, direction) tuples for predicted edges
+        E_star: set of (idx, direction) tuples for true edges
+    """
+    # Build predicted edge set
+    E_hat = set()
+    for idx in selected_idx.tolist():
+        direction = dir_pred[idx].item()
+        E_hat.add((idx, direction))
+    
+    # Build true edge set
+    E_star = set()
+    for idx in range(len(labels)):
+        label = labels[idx].item()
+        if label > 0:  # 1=forward, 2=backward
+            E_star.add((idx, label))
+    
+    return E_hat, E_star
+
+
+# =============================================================================
+# C1. Directed Edge-Set F1 (Equation 26)
+# =============================================================================
+
+def compute_directed_f1(E_hat, E_star):
+    """
+    Compute F1 on directed edge sets.
+    
+    F1 = 2 * |E_hat ∩ E_star| / (|E_hat| + |E_star|)
+    
+    Args:
+        E_hat: set of (idx, direction) tuples for predicted edges
+        E_star: set of (idx, direction) tuples for true edges
+    
+    Returns:
+        f1, precision, recall, tp, fp, fn
+    """
+    intersection = E_hat & E_star
+    
+    tp = len(intersection)
+    fp = len(E_hat) - tp
+    fn = len(E_star) - tp
+    
+    precision = tp / len(E_hat) if len(E_hat) > 0 else 0.0
+    recall = tp / len(E_star) if len(E_star) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    
+    return f1, precision, recall, tp, fp, fn
+
+
+# =============================================================================
+# C2. SHD on pair states (clean formulation)
+# =============================================================================
+
+def compute_pair_state_shd(selected_idx, dir_pred, labels):
+    """
+    Compute SHD using pair-state representation.
+    
+    Each pair has a state in {0=no_edge, 1=forward, 2=backward}.
+    SHD = number of pairs where pred_state != true_state.
+    
+    Reversal costs 1 (standard SHD definition).
+    
+    Args:
+        selected_idx: indices of selected edges
+        dir_pred: [N] predicted direction {1=forward, 2=backward}
+        labels: [N] true labels {0=no_edge, 1=forward, 2=backward}
+    
+    Returns:
+        shd: Structural Hamming Distance
+        normalized_shd: SHD / N (normalized by number of pairs)
+        m_true: number of true edges
+    """
+    N = len(labels)
+    
+    # Build predicted state array (0 = no edge, 1 = forward, 2 = backward)
+    pred_state = torch.zeros(N, dtype=torch.long, device=labels.device)
+    for idx in selected_idx.tolist():
+        pred_state[idx] = dir_pred[idx]
+    
+    # True state is just the labels
+    true_state = labels.long()
+    
+    # SHD = count of mismatches
+    shd = (pred_state != true_state).sum().item()
+    
+    # Normalize by number of pairs
+    normalized_shd = shd / N if N > 0 else 0.0
+    
+    # Count true edges
+    m_true = (labels > 0).sum().item()
+    
+    return shd, normalized_shd, m_true
+
+
+# =============================================================================
+# C3. AUROC/AUPRC on edge existence
+# =============================================================================
+
+def compute_edge_existence_metrics(p_edge, labels):
+    """
+    Compute AUROC/AUPRC on edge existence (threshold-independent).
+    
+    Args:
+        p_edge: [N] edge existence probabilities
+        labels: [N] true labels {0=no_edge, 1=forward, 2=backward}
     
     Returns:
         auroc: AUROC score for edge existence
         auprc: AUPRC score for edge existence
     """
-    # Apply temperature scaling and softmax
-    probs_scaled = F.softmax(probs / temperature, dim=-1)
-    
-    # Edge existence probability: P(edge) = P(forward) + P(backward) = 1 - P(no_edge)
-    p_edge = probs_scaled[:, 1] + probs_scaled[:, 2]
-    
-    # Binary labels: does any edge exist?
-    t_edge = (labels > 0).float()
+    # Binary labels: does any edge exist? (long type for torchmetrics)
+    t_edge = (labels > 0).long()
     
     # Compute metrics
     auroc_metric = BinaryAUROC()
@@ -47,137 +223,100 @@ def compute_edge_existence_metrics(probs, labels, temperature=1.0):
     return auroc, auprc
 
 
-def compute_directed_edge_set_f1(probs, labels, threshold=0.5, temperature=1.0):
+# =============================================================================
+# Main entry point: compute all metrics
+# =============================================================================
+
+def compute_all_edge_metrics(logits, labels, temperature=1.0, 
+                              edge_select_mode="threshold", edge_threshold=0.5):
     """
-    Compute F1 on directed edge sets (matches guide's Equation 26).
+    Compute all edge metrics using the specified selection policy.
     
-    This implements the correct edge-set based F1:
-    1. Decide if edge exists: p_edge = P(forward) + P(backward) >= threshold
-    2. If yes, pick direction: argmax(P(forward), P(backward))
-    3. Build predicted set Ê and true set E*
-    4. Compute F1 = 2|Ê∩E*| / (|Ê| + |E*|)
+    This is the main entry point for edge-set based metrics.
     
     Args:
-        probs: [N, 3] tensor with logits [z_no_edge, z_forward, z_backward]
+        logits: [N, 3] tensor with logits [z_no_edge, z_forward, z_backward]
         labels: [N] tensor with values {0=no_edge, 1=forward, 2=backward}
-        threshold: Threshold for edge existence decision (default=0.5)
         temperature: Temperature scaling factor
+        edge_select_mode: "threshold" or "oracle_k"
+        edge_threshold: Threshold for edge selection (threshold mode only)
     
     Returns:
-        f1: F1 score on directed edge sets
-        precision: Precision = |Ê∩E*| / |Ê|
-        recall: Recall = |Ê∩E*| / |E*|
-        nnz: Number of predicted edges (|Ê|)
+        dict with all metrics:
+            - auroc, auprc: edge existence metrics (threshold-independent)
+            - f1, precision, recall: directed edge-set metrics
+            - tp, fp, fn: counts for debugging
+            - shd, normalized_shd: pair-state SHD
+            - nnz_pred: number of predicted edges
+            - m_true: number of true edges
+            - p_edge_stats: dict with min/mean/max of p_edge
     """
-    # Apply temperature scaling and softmax
-    probs_scaled = F.softmax(probs / temperature, dim=-1)
+    # B1: Compute probabilities
+    probs, p_edge, dir_pred = compute_edge_probs(logits, temperature)
     
-    # Step 1: Compute edge existence scores
-    p_edge = probs_scaled[:, 1] + probs_scaled[:, 2]
+    # C3: AUROC/AUPRC (threshold-independent)
+    auroc, auprc = compute_edge_existence_metrics(p_edge, labels)
     
-    # Step 2: Decide which edges exist
-    edge_exists = p_edge >= threshold
+    # B2: Select edges
+    selected_idx, k = select_edges(p_edge, labels, edge_select_mode, edge_threshold)
     
-    # Step 3: For existing edges, pick direction
-    # direction: 0 = forward, 1 = backward
-    direction = torch.argmax(probs_scaled[:, 1:], dim=1)
+    # B3: Build edge sets
+    E_hat, E_star = build_edge_sets(selected_idx, dir_pred, labels)
     
-    # Step 4: Build predicted directed edge set Ê
-    E_hat = set()
-    for idx in range(len(probs)):
-        if edge_exists[idx]:
-            # Use tuple (index, direction_type) to represent directed edge
-            if direction[idx] == 0:
-                E_hat.add((idx, 'forward'))
-            else:
-                E_hat.add((idx, 'backward'))
+    # C1: Directed F1
+    f1, precision, recall, tp, fp, fn = compute_directed_f1(E_hat, E_star)
     
-    # Step 5: Build true directed edge set E*
-    E_star = set()
-    for idx in range(len(labels)):
-        label = labels[idx].item()
-        if label == 1:  # forward edge exists
-            E_star.add((idx, 'forward'))
-        elif label == 2:  # backward edge exists
-            E_star.add((idx, 'backward'))
+    # C2: Pair-state SHD
+    shd, normalized_shd, m_true = compute_pair_state_shd(selected_idx, dir_pred, labels)
     
-    # Step 6: Compute set-based metrics
-    intersection = E_hat & E_star
+    # Debug stats
+    p_edge_stats = {
+        "min": p_edge.min().item(),
+        "mean": p_edge.mean().item(),
+        "max": p_edge.max().item()
+    }
     
-    tp = len(intersection)
-    fp = len(E_hat) - tp
-    fn = len(E_star) - tp
-    
-    # Precision, Recall, F1
-    precision = tp / len(E_hat) if len(E_hat) > 0 else 0.0
-    recall = tp / len(E_star) if len(E_star) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    
-    nnz = len(E_hat)  # Number of predicted edges
-    
-    return f1, precision, recall, nnz
+    return {
+        # Threshold-independent metrics
+        "auroc": auroc.item() if hasattr(auroc, 'item') else auroc,
+        "auprc": auprc.item() if hasattr(auprc, 'item') else auprc,
+        
+        # Directed edge-set metrics
+        "f1": f1,
+        "precision": precision,
+        "recall": recall,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        
+        # SHD metrics
+        "shd": shd,
+        "normalized_shd": normalized_shd,
+        
+        # Counts for debugging
+        "nnz_pred": len(E_hat),
+        "m_true": m_true,
+        
+        # Selection info
+        "edge_select_mode": edge_select_mode,
+        "edge_threshold": edge_threshold if edge_select_mode == "threshold" else None,
+        
+        # Debug stats
+        "p_edge_stats": p_edge_stats
+    }
+
+
+# =============================================================================
+# Legacy compatibility wrappers (to be removed after verification)
+# =============================================================================
+
+def compute_directed_edge_set_f1(probs, labels, threshold=0.5, temperature=1.0):
+    """Legacy wrapper for compute_all_edge_metrics - F1 portion."""
+    result = compute_all_edge_metrics(probs, labels, temperature, "threshold", threshold)
+    return result["f1"], result["precision"], result["recall"], result["nnz_pred"]
 
 
 def compute_directed_edge_set_shd(probs, labels, threshold=0.5, temperature=1.0):
-    """
-    Compute SHD on directed edge sets (matches F1 computation).
-    
-    This ensures SHD and F1 evaluate the same thing in edge-set mode:
-    both compute on DIRECTED edge sets, so reversed edges are penalized.
-    
-    Args:
-        probs: [N, 3] tensor with logits [z_no_edge, z_forward, z_backward]
-        labels: [N] tensor with values {0=no_edge, 1=forward, 2=backward}
-        threshold: Threshold for edge existence decision
-        temperature: Temperature scaling factor
-    
-    Returns:
-        shd: Structural Hamming Distance (count of edge differences)
-        normalized_shd: SHD normalized by total possible edges
-    """
-    # Apply temperature scaling and softmax
-    probs_scaled = F.softmax(probs / temperature, dim=-1)
-    
-    # Step 1: Compute edge existence scores
-    p_edge = probs_scaled[:, 1] + probs_scaled[:, 2]
-    
-    # Step 2: Decide which edges exist
-    edge_exists = p_edge >= threshold
-    
-    # Step 3: For existing edges, pick direction
-    direction = torch.argmax(probs_scaled[:, 1:], dim=1)
-    
-    # Step 4: Build predicted directed edge set Ê
-    E_hat = set()
-    for idx in range(len(probs)):
-        if edge_exists[idx]:
-            if direction[idx] == 0:
-                E_hat.add((idx, 'forward'))
-            else:
-                E_hat.add((idx, 'backward'))
-    
-    # Step 5: Build true directed edge set E*
-    E_star = set()
-    for idx in range(len(labels)):
-        label = labels[idx].item()
-        if label == 1:  # forward edge
-            E_star.add((idx, 'forward'))
-        elif label == 2:  # backward edge
-            E_star.add((idx, 'backward'))
-    
-    # Step 6: Compute SHD as symmetric difference
-    # Symmetric difference = (E_hat - E_star) ∪ (E_star - E_hat)
-    # = edges that are in one set but not the other
-    symmetric_diff = E_hat.symmetric_difference(E_star)
-    shd = len(symmetric_diff)
-    
-    # Normalized SHD
-    # Total number of edge positions = N (number of edge pairs)
-    # For directed graphs: each pair can be (no_edge, forward, backward)
-    # Max possible edges = N (all pairs as directed edges in one direction)
-    # But for SHD normalization, we use 2*N (both directions possible)
-    n_pairs = len(probs)
-    max_edges = 2 * n_pairs  # Maximum directed edges (both directions)
-    normalized_shd = shd / max_edges if max_edges > 0 else 0.0
-    
-    return shd, normalized_shd
+    """Legacy wrapper for compute_all_edge_metrics - SHD portion."""
+    result = compute_all_edge_metrics(probs, labels, temperature, "threshold", threshold)
+    return result["shd"], result["normalized_shd"]
