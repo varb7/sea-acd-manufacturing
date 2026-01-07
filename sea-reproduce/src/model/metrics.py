@@ -88,9 +88,9 @@ def compute_directed_edge_set_f1(probs, labels, threshold=0.5, temperature=1.0):
         if edge_exists[idx]:
             # Use tuple (index, direction_type) to represent directed edge
             if direction[idx] == 0:
-                E_hat.add((idx.item(), 'forward'))
+                E_hat.add((idx, 'forward'))
             else:
-                E_hat.add((idx.item(), 'backward'))
+                E_hat.add((idx, 'backward'))
     
     # Step 5: Build true directed edge set E*
     E_star = set()
@@ -116,3 +116,68 @@ def compute_directed_edge_set_f1(probs, labels, threshold=0.5, temperature=1.0):
     nnz = len(E_hat)  # Number of predicted edges
     
     return f1, precision, recall, nnz
+
+
+def compute_directed_edge_set_shd(probs, labels, threshold=0.5, temperature=1.0):
+    """
+    Compute SHD on directed edge sets (matches F1 computation).
+    
+    This ensures SHD and F1 evaluate the same thing in edge-set mode:
+    both compute on DIRECTED edge sets, so reversed edges are penalized.
+    
+    Args:
+        probs: [N, 3] tensor with logits [z_no_edge, z_forward, z_backward]
+        labels: [N] tensor with values {0=no_edge, 1=forward, 2=backward}
+        threshold: Threshold for edge existence decision
+        temperature: Temperature scaling factor
+    
+    Returns:
+        shd: Structural Hamming Distance (count of edge differences)
+        normalized_shd: SHD normalized by total possible edges
+    """
+    # Apply temperature scaling and softmax
+    probs_scaled = F.softmax(probs / temperature, dim=-1)
+    
+    # Step 1: Compute edge existence scores
+    p_edge = probs_scaled[:, 1] + probs_scaled[:, 2]
+    
+    # Step 2: Decide which edges exist
+    edge_exists = p_edge >= threshold
+    
+    # Step 3: For existing edges, pick direction
+    direction = torch.argmax(probs_scaled[:, 1:], dim=1)
+    
+    # Step 4: Build predicted directed edge set Ê
+    E_hat = set()
+    for idx in range(len(probs)):
+        if edge_exists[idx]:
+            if direction[idx] == 0:
+                E_hat.add((idx, 'forward'))
+            else:
+                E_hat.add((idx, 'backward'))
+    
+    # Step 5: Build true directed edge set E*
+    E_star = set()
+    for idx in range(len(labels)):
+        label = labels[idx].item()
+        if label == 1:  # forward edge
+            E_star.add((idx, 'forward'))
+        elif label == 2:  # backward edge
+            E_star.add((idx, 'backward'))
+    
+    # Step 6: Compute SHD as symmetric difference
+    # Symmetric difference = (E_hat - E_star) ∪ (E_star - E_hat)
+    # = edges that are in one set but not the other
+    symmetric_diff = E_hat.symmetric_difference(E_star)
+    shd = len(symmetric_diff)
+    
+    # Normalized SHD
+    # Total number of edge positions = N (number of edge pairs)
+    # For directed graphs: each pair can be (no_edge, forward, backward)
+    # Max possible edges = N (all pairs as directed edges in one direction)
+    # But for SHD normalization, we use 2*N (both directions possible)
+    n_pairs = len(probs)
+    max_edges = 2 * n_pairs  # Maximum directed edges (both directions)
+    normalized_shd = shd / max_edges if max_edges > 0 else 0.0
+    
+    return shd, normalized_shd

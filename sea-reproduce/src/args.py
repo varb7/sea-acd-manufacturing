@@ -171,6 +171,11 @@ def get_parser():
                         type=float, default=1.0,
                         help="Temperature scaling for softmax calibration (T>1 = less confident, T<1 = more confident)")
     
+    # ==== metric mode ====
+    parser.add_argument("--use_edge_set_f1",
+                        action="store_true",
+                        help="Use correct edge-set based F1 (guide's Eq. 26) instead of legacy metrics")
+    
     return parser
 
 

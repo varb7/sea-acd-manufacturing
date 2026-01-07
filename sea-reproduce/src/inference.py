@@ -38,6 +38,10 @@ def compute_structural_metrics(pred_list, true_list):
     """
     Compute SHD, NNZ, SID from prediction and true edge lists.
     
+    NOTE: When --use_edge_set_f1 is enabled, predictions are edge existence
+    probabilities (p_edge) instead of direction probabilities. Both use the
+    same threshold=0.5 for consistency.
+    
     Args:
         pred_list: list of predicted edge probabilities (flattened)
         true_list: list of true edge labels (flattened)
@@ -209,7 +213,15 @@ def main():
             key_to_metrics[key]["pred"].append(pred[i])
         
         # Compute structural metrics from predictions and ground truth
-        if i < len(pred) and i < len(true) and pred[i] and true[i]:
+        # Use pre-computed edge-set metrics from aggregator if available (ensures F1/SHD consistency)
+        if "shd" in results_dict and i < len(results_dict["shd"]):
+            key_to_metrics[key]["shd"].append(results_dict["shd"][i])
+        if "normalized_shd" in results_dict and i < len(results_dict["normalized_shd"]):
+            key_to_metrics[key]["normalized_shd"].append(results_dict["normalized_shd"][i])
+        if "nnz" in results_dict and i < len(results_dict["nnz"]):
+            key_to_metrics[key]["nnz"].append(results_dict["nnz"][i])
+        # Fallback: compute from pred/true if edge-set metrics not available (legacy mode)
+        elif i < len(pred) and i < len(true) and pred[i] and true[i]:
             shd, norm_shd, nnz, sid, norm_sid = compute_structural_metrics(
                 pred[i], true[i]
             )

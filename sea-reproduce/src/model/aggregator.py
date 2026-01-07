@@ -28,7 +28,9 @@ from torchmetrics.classification import (
 
 from .axial import AxialTransformer, TopLayer
 from .utils import get_params_groups
-from .metrics import compute_edge_existence_metrics, compute_directed_edge_set_f1
+from .metrics import (compute_edge_existence_metrics, 
+                      compute_directed_edge_set_f1,
+                      compute_directed_edge_set_shd)
 
 
 class Aggregator(pl.LightningModule):
@@ -147,8 +149,9 @@ class Aggregator(pl.LightningModule):
             joint_label = []
             for i in range(len(forward_edge)):
                 forward_i = forward_label[i][forward_mask[i]]
-                backward_i = backward_label[i][backward_mask[i]]
-                joint_label.append(torch.cat([forward_i, backward_i]))
+                backward_i = backward_label[i][backward_mask[i]] * 2  # Scale to get {0, 2}
+                # forward/backward should be mutually exclusive, combine to get {0, 1, 2}
+                joint_label.append(forward_i + backward_i)
         return edge_pred, joint_label
 
     def compute_losses(self, output, batch):
@@ -197,15 +200,47 @@ class Aggregator(pl.LightningModule):
                     # Compute directed edge-set F1
                     f1_val, prec, rec, nnz_val = compute_directed_edge_set_f1(p, t, 0.5, temperature)
                     f1.append(f1_val)
-                    acc.append(prec)  # Store precision in acc field
+                    acc.append(rec)  # Store recall in acc field for edge-set mode
+                    
+                    # Compute SHD on same directed edge sets (aligns with F1)
+                    shd_val, norm_shd_val = compute_directed_edge_set_shd(p, t, 0.5, temperature)
                     
                     if save_preds:
-                        # Save edge existence probabilities for structural metrics
+                        # Save directed edge predictions for SHD calculation
+                        # Build binary vectors for directed edges to match legacy format
                         probs = F.softmax(p / temperature, dim=-1)
-                        p_edge = probs[:, 1] + probs[:, 2]  # Edge existence score
-                        t_edge = (t > 0).float()  # Binary: edge exists or not
-                        pred_list.append(p_edge.cpu().tolist())
-                        true_list.append(t_edge.cpu().tolist())
+                        p_edge = probs[:, 1] + probs[:, 2]
+                        edge_exists = p_edge >= 0.5
+                        direction = torch.argmax(probs[:, 1:], dim=1)
+                        
+                        # Create directed edge vectors [forward_1, backward_1, forward_2, backward_2, ...]
+                        pred_directed = []
+                        true_directed = []
+                        
+                        for idx in range(len(p)):
+                            # Forward edge
+                            if edge_exists[idx] and direction[idx] == 0:
+                                pred_directed.extend([1.0, 0.0])  # Predict forward
+                            elif edge_exists[idx] and direction[idx] == 1:
+                                pred_directed.extend([0.0, 1.0])  # Predict backward
+                            else:
+                                pred_directed.extend([0.0, 0.0])  # No edge
+                            
+                            # True labels
+                            if t[idx] == 1:  # True forward
+                                true_directed.extend([1.0, 0.0])
+                            elif t[idx] == 2:  # True backward
+                                true_directed.extend([0.0, 1.0])
+                            else:  # No edge
+                                true_directed.extend([0.0, 0.0])
+                        
+                        pred_list.append(pred_directed)
+                        true_list.append(true_directed)
+                        
+                        # Also store SHD computed here for this graph
+                        batch.setdefault('shd', []).append(shd_val)
+                        batch.setdefault('normalized_shd', []).append(norm_shd_val)
+                        batch.setdefault('nnz', []).append(nnz_val)
                 else:
                     # OLD: Legacy metrics (backward compatible)
                     # Apply temperature scaling to improve probability calibration
@@ -255,6 +290,13 @@ class Aggregator(pl.LightningModule):
         if save_preds:
             outputs["pred"] = pred_list
             outputs["true"] = true_list
+        # Include SHD/NNZ if computed in edge-set mode
+        if "shd" in batch:
+            outputs["shd"] = batch["shd"]
+        if "normalized_shd" in batch:
+            outputs["normalized_shd"] = batch["normalized_shd"]
+        if "nnz" in batch:
+            outputs["nnz"] = batch["nnz"]
         return outputs
 
     def training_step(self, batch, batch_idx):
