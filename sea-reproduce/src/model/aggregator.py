@@ -74,10 +74,11 @@ class Aggregator(pl.LightningModule):
         results["time"] = time_val.item() if torch.is_tensor(time_val) else time_val
         return results
 
-    def symmetrize(self, output, batch, reduce=True):
+    def symmetrize(self, output, batch, reduce=True, use_edge_set=False):
         """
             P(i->j) = 1 - P(j->i)
             reduce: bool  True to reduce batch, False to preserve graphs
+            use_edge_set: bool  True for {0,1,2} labels, False for legacy concat format
         """
         # symmetrize output
         # select upper and lower triangular, skip diagonal
@@ -149,9 +150,14 @@ class Aggregator(pl.LightningModule):
             joint_label = []
             for i in range(len(forward_edge)):
                 forward_i = forward_label[i][forward_mask[i]]
-                backward_i = backward_label[i][backward_mask[i]] * 2  # Scale to get {0, 2}
-                # forward/backward should be mutually exclusive, combine to get {0, 1, 2}
-                joint_label.append(forward_i + backward_i)
+                backward_i = backward_label[i][backward_mask[i]]
+                if use_edge_set:
+                    # Edge-set mode: {0, 1, 2} encoding (length U)
+                    backward_i_scaled = backward_i * 2  # Scale to get {0, 2}
+                    joint_label.append(forward_i + backward_i_scaled)  # {0, 1, 2}
+                else:
+                    # Legacy mode: concatenated binary labels (length 2U)
+                    joint_label.append(torch.cat([forward_i, backward_i]))
         return edge_pred, joint_label
 
     def compute_losses(self, output, batch):
@@ -168,10 +174,10 @@ class Aggregator(pl.LightningModule):
         if save_preds:
             pred_list, true_list = [], []
         # do not reduce over batch
-        pred, true = self.symmetrize(output, batch, reduce=False)
+        use_edge_set = getattr(self.args, 'use_edge_set_f1', False)
+        pred, true = self.symmetrize(output, batch, reduce=False, use_edge_set=use_edge_set)
         for i, (p, t) in enumerate(zip(pred, true)):
             temperature = getattr(self.args, 'temperature', 1.0)
-            use_edge_set = getattr(self.args, 'use_edge_set_f1', False)
             
             # Check if tensors are empty (no valid edges after filtering)
             if p.numel() == 0 or t.numel() == 0:
