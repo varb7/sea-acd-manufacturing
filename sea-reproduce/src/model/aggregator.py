@@ -154,7 +154,8 @@ class Aggregator(pl.LightningModule):
                 if use_edge_set:
                     # Edge-set mode: {0, 1, 2} encoding (length U)
                     backward_i_scaled = backward_i * 2  # Scale to get {0, 2}
-                    joint_label.append(forward_i + backward_i_scaled)  # {0, 1, 2}
+                    # Convert to long for torchmetrics compatibility
+                    joint_label.append((forward_i + backward_i_scaled).long())
                 else:
                     # Legacy mode: concatenated binary labels (length 2U)
                     joint_label.append(torch.cat([forward_i, backward_i]))
