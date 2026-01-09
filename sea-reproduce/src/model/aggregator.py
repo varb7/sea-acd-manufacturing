@@ -193,38 +193,51 @@ class Aggregator(pl.LightningModule):
             
             try:
                 if use_edge_set:
-                    # NEW: Use unified edge metrics with configurable selection mode
+                    # NEW: Use unified edge metrics - computes BOTH threshold and oracle_k F1
                     # p shape: [N, 3] logits [z_no_edge, z_forward, z_backward]
                     # t shape: [N] labels {0, 1, 2}
                     
                     temperature = getattr(self.args, 'temperature', 1.0)
-                    edge_select_mode = getattr(self.args, 'edge_select_mode', 'threshold')
                     edge_threshold = getattr(self.args, 'edge_threshold', 0.5)
                     
-                    # Compute all metrics in one call
+                    # Compute all metrics in one call (both threshold and oracle_k)
                     metrics = compute_all_edge_metrics(
                         p, t, 
                         temperature=temperature,
-                        edge_select_mode=edge_select_mode,
                         edge_threshold=edge_threshold
                     )
                     
-                    # Extract metrics
+                    # Extract AUC metrics (legacy - flattened forward/backward)
                     auroc.append(metrics['auroc'])
                     auprc.append(metrics['auprc'])
-                    f1.append(metrics['f1'])
-                    acc.append(metrics['recall'])  # Store recall in acc field
+                    
+                    # Store BOTH F1 metrics - threshold in f1, oracle_k in acc field
+                    f1.append(metrics['f1_threshold'])
+                    acc.append(metrics['f1_oracle_k'])  # Use acc field for oracle_k F1
                     
                     if save_preds:
-                        # Store metrics for debugging
-                        batch.setdefault('shd', []).append(metrics['shd'])
-                        batch.setdefault('normalized_shd', []).append(metrics['normalized_shd'])
-                        batch.setdefault('nnz', []).append(metrics['nnz_pred'])
+                        # Store THRESHOLD-based metrics
+                        batch.setdefault('shd_threshold', []).append(metrics['shd_threshold'])
+                        batch.setdefault('normalized_shd_threshold', []).append(metrics['normalized_shd_threshold'])
+                        batch.setdefault('nnz_threshold', []).append(metrics['nnz_pred_threshold'])
+                        batch.setdefault('tp_threshold', []).append(metrics['tp_threshold'])
+                        batch.setdefault('fp_threshold', []).append(metrics['fp_threshold'])
+                        batch.setdefault('fn_threshold', []).append(metrics['fn_threshold'])
+                        batch.setdefault('precision_threshold', []).append(metrics['precision_threshold'])
+                        batch.setdefault('recall_threshold', []).append(metrics['recall_threshold'])
+                        
+                        # Store ORACLE-K based metrics
+                        batch.setdefault('shd_oracle_k', []).append(metrics['shd_oracle_k'])
+                        batch.setdefault('normalized_shd_oracle_k', []).append(metrics['normalized_shd_oracle_k'])
+                        batch.setdefault('nnz_oracle_k', []).append(metrics['nnz_pred_oracle_k'])
+                        batch.setdefault('tp_oracle_k', []).append(metrics['tp_oracle_k'])
+                        batch.setdefault('fp_oracle_k', []).append(metrics['fp_oracle_k'])
+                        batch.setdefault('fn_oracle_k', []).append(metrics['fn_oracle_k'])
+                        batch.setdefault('precision_oracle_k', []).append(metrics['precision_oracle_k'])
+                        batch.setdefault('recall_oracle_k', []).append(metrics['recall_oracle_k'])
+                        
+                        # Common metadata
                         batch.setdefault('m_true', []).append(metrics['m_true'])
-                        batch.setdefault('tp', []).append(metrics['tp'])
-                        batch.setdefault('fp', []).append(metrics['fp'])
-                        batch.setdefault('fn', []).append(metrics['fn'])
-                        batch.setdefault('precision', []).append(metrics['precision'])
                         
                         # Build pred/true lists for compatibility
                         # Store raw logits and labels instead of complex transformation
@@ -272,31 +285,53 @@ class Aggregator(pl.LightningModule):
         outputs = {}
         outputs["auroc"] = auroc
         outputs["auprc"] = auprc
-        outputs["acc"] = acc
-        outputs["f1"] = f1
+        outputs["f1_threshold"] = f1  # Threshold-based F1
+        outputs["f1_oracle_k"] = acc   # Oracle-K F1 (stored in acc during loop)
         # need to save these...
         outputs["key"] = batch["key"]
         if save_preds:
             outputs["pred"] = pred_list
             outputs["true"] = true_list
-        # Include SHD/NNZ if computed in edge-set mode
-        if "shd" in batch:
-            outputs["shd"] = batch["shd"]
-        if "normalized_shd" in batch:
-            outputs["normalized_shd"] = batch["normalized_shd"]
-        if "nnz" in batch:
-            outputs["nnz"] = batch["nnz"]
-        # Include new debug metrics
+        
+        # Include THRESHOLD-based metrics if computed
+        if "shd_threshold" in batch:
+            outputs["shd_threshold"] = batch["shd_threshold"]
+        if "normalized_shd_threshold" in batch:
+            outputs["normalized_shd_threshold"] = batch["normalized_shd_threshold"]
+        if "nnz_threshold" in batch:
+            outputs["nnz_threshold"] = batch["nnz_threshold"]
+        if "tp_threshold" in batch:
+            outputs["tp_threshold"] = batch["tp_threshold"]
+        if "fp_threshold" in batch:
+            outputs["fp_threshold"] = batch["fp_threshold"]
+        if "fn_threshold" in batch:
+            outputs["fn_threshold"] = batch["fn_threshold"]
+        if "precision_threshold" in batch:
+            outputs["precision_threshold"] = batch["precision_threshold"]
+        if "recall_threshold" in batch:
+            outputs["recall_threshold"] = batch["recall_threshold"]
+            
+        # Include ORACLE-K based metrics if computed
+        if "shd_oracle_k" in batch:
+            outputs["shd_oracle_k"] = batch["shd_oracle_k"]
+        if "normalized_shd_oracle_k" in batch:
+            outputs["normalized_shd_oracle_k"] = batch["normalized_shd_oracle_k"]
+        if "nnz_oracle_k" in batch:
+            outputs["nnz_oracle_k"] = batch["nnz_oracle_k"]
+        if "tp_oracle_k" in batch:
+            outputs["tp_oracle_k"] = batch["tp_oracle_k"]
+        if "fp_oracle_k" in batch:
+            outputs["fp_oracle_k"] = batch["fp_oracle_k"]
+        if "fn_oracle_k" in batch:
+            outputs["fn_oracle_k"] = batch["fn_oracle_k"]
+        if "precision_oracle_k" in batch:
+            outputs["precision_oracle_k"] = batch["precision_oracle_k"]
+        if "recall_oracle_k" in batch:
+            outputs["recall_oracle_k"] = batch["recall_oracle_k"]
+            
+        # Common metadata
         if "m_true" in batch:
             outputs["m_true"] = batch["m_true"]
-        if "tp" in batch:
-            outputs["tp"] = batch["tp"]
-        if "fp" in batch:
-            outputs["fp"] = batch["fp"]
-        if "fn" in batch:
-            outputs["fn"] = batch["fn"]
-        if "precision" in batch:
-            outputs["precision"] = batch["precision"]
         return outputs
 
     def training_step(self, batch, batch_idx):

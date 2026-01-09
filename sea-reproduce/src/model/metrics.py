@@ -223,51 +223,90 @@ def compute_edge_existence_metrics(p_edge, labels):
     return auroc, auprc
 
 
+def compute_legacy_auc(probs, labels):
+    """
+    Legacy AUROC/AUPRC calculation for comparison with old results.
+    
+    OLD BEHAVIOR: Flatten forward/backward probabilities into a single vector
+    and compare against flattened labels. This evaluates P(forward) and P(backward)
+    separately rather than P(edge).
+    
+    Args:
+        probs: [N, 3] softmax probabilities [p_no_edge, p_forward, p_backward]
+        labels: [N] true labels {0=no_edge, 1=forward, 2=backward}
+    
+    Returns:
+        auroc: AUROC score (legacy method)
+        auprc: AUPRC score (legacy method)
+    """
+    # OLD: p = F.softmax(p, dim=-1)[:,1:].t().reshape(-1)
+    # This takes columns 1,2 (forward, backward), transposes, and flattens
+    # Result: [P(fwd)_1, P(fwd)_2, ..., P(bwd)_1, P(bwd)_2, ...]
+    p_flat = probs[:, 1:].t().reshape(-1)  # Shape: [2N]
+    
+    # OLD: t was already flattened from torch.cat([forward_i, backward_i])
+    # For legacy mode, we need to reconstruct this format
+    # forward_label = 1 if label == 1, else 0
+    # backward_label = 1 if label == 2, else 0
+    forward_labels = (labels == 1).long()
+    backward_labels = (labels == 2).long()
+    t_flat = torch.cat([forward_labels, backward_labels])  # Shape: [2N]
+    
+    # Compute metrics
+    auroc_metric = BinaryAUROC()
+    auprc_metric = BinaryAveragePrecision()
+    
+    auroc = auroc_metric(p_flat, t_flat)
+    auprc = auprc_metric(p_flat, t_flat)
+    
+    return auroc, auprc
+
+
 # =============================================================================
 # Main entry point: compute all metrics
 # =============================================================================
 
-def compute_all_edge_metrics(logits, labels, temperature=1.0, 
-                              edge_select_mode="threshold", edge_threshold=0.5):
+def compute_all_edge_metrics(logits, labels, temperature=1.0, edge_threshold=0.5):
     """
-    Compute all edge metrics using the specified selection policy.
+    Compute all edge metrics using BOTH threshold and oracle-K selection policies.
     
     This is the main entry point for edge-set based metrics.
+    Always uses legacy AUC (flattened forward/backward probs) for consistency with original SEA.
     
     Args:
         logits: [N, 3] tensor with logits [z_no_edge, z_forward, z_backward]
         labels: [N] tensor with values {0=no_edge, 1=forward, 2=backward}
         temperature: Temperature scaling factor
-        edge_select_mode: "threshold" or "oracle_k"
-        edge_threshold: Threshold for edge selection (threshold mode only)
+        edge_threshold: Threshold for edge selection in threshold mode (default=0.5)
     
     Returns:
         dict with all metrics:
-            - auroc, auprc: edge existence metrics (threshold-independent)
-            - f1, precision, recall: directed edge-set metrics
-            - tp, fp, fn: counts for debugging
-            - shd, normalized_shd: pair-state SHD
-            - nnz_pred: number of predicted edges
+            - auroc, auprc: legacy AUC metrics (threshold-independent)
+            - f1_threshold, precision_threshold, recall_threshold: threshold-based metrics
+            - f1_oracle_k, precision_oracle_k, recall_oracle_k: oracle-K based metrics
+            - shd_threshold, shd_oracle_k: SHD for each mode
+            - tp, fp, fn counts for both modes
+            - nnz_pred: number of predicted edges (threshold mode)
             - m_true: number of true edges
             - p_edge_stats: dict with min/mean/max of p_edge
     """
     # B1: Compute probabilities
     probs, p_edge, dir_pred = compute_edge_probs(logits, temperature)
     
-    # C3: AUROC/AUPRC (threshold-independent)
-    auroc, auprc = compute_edge_existence_metrics(p_edge, labels)
+    # C3: AUROC/AUPRC - Always use legacy (flattened forward/backward) for consistency
+    auroc, auprc = compute_legacy_auc(probs, labels)
     
-    # B2: Select edges
-    selected_idx, k = select_edges(p_edge, labels, edge_select_mode, edge_threshold)
+    # ========== THRESHOLD MODE ==========
+    selected_idx_thresh, k_thresh = select_edges(p_edge, labels, "threshold", edge_threshold)
+    E_hat_thresh, E_star = build_edge_sets(selected_idx_thresh, dir_pred, labels)
+    f1_thresh, prec_thresh, rec_thresh, tp_thresh, fp_thresh, fn_thresh = compute_directed_f1(E_hat_thresh, E_star)
+    shd_thresh, norm_shd_thresh, m_true = compute_pair_state_shd(selected_idx_thresh, dir_pred, labels)
     
-    # B3: Build edge sets
-    E_hat, E_star = build_edge_sets(selected_idx, dir_pred, labels)
-    
-    # C1: Directed F1
-    f1, precision, recall, tp, fp, fn = compute_directed_f1(E_hat, E_star)
-    
-    # C2: Pair-state SHD
-    shd, normalized_shd, m_true = compute_pair_state_shd(selected_idx, dir_pred, labels)
+    # ========== ORACLE-K MODE ==========
+    selected_idx_oracle, k_oracle = select_edges(p_edge, labels, "oracle_k", edge_threshold)
+    E_hat_oracle, _ = build_edge_sets(selected_idx_oracle, dir_pred, labels)
+    f1_oracle, prec_oracle, rec_oracle, tp_oracle, fp_oracle, fn_oracle = compute_directed_f1(E_hat_oracle, E_star)
+    shd_oracle, norm_shd_oracle, _ = compute_pair_state_shd(selected_idx_oracle, dir_pred, labels)
     
     # Debug stats
     p_edge_stats = {
@@ -277,29 +316,35 @@ def compute_all_edge_metrics(logits, labels, temperature=1.0,
     }
     
     return {
-        # Threshold-independent metrics
+        # Threshold-independent metrics (legacy AUC)
         "auroc": auroc.item() if hasattr(auroc, 'item') else auroc,
         "auprc": auprc.item() if hasattr(auprc, 'item') else auprc,
         
-        # Directed edge-set metrics
-        "f1": f1,
-        "precision": precision,
-        "recall": recall,
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
+        # ===== THRESHOLD-BASED METRICS =====
+        "f1_threshold": f1_thresh,
+        "precision_threshold": prec_thresh,
+        "recall_threshold": rec_thresh,
+        "tp_threshold": tp_thresh,
+        "fp_threshold": fp_thresh,
+        "fn_threshold": fn_thresh,
+        "shd_threshold": shd_thresh,
+        "normalized_shd_threshold": norm_shd_thresh,
         
-        # SHD metrics
-        "shd": shd,
-        "normalized_shd": normalized_shd,
+        # ===== ORACLE-K BASED METRICS =====
+        "f1_oracle_k": f1_oracle,
+        "precision_oracle_k": prec_oracle,
+        "recall_oracle_k": rec_oracle,
+        "tp_oracle_k": tp_oracle,
+        "fp_oracle_k": fp_oracle,
+        "fn_oracle_k": fn_oracle,
+        "shd_oracle_k": shd_oracle,
+        "normalized_shd_oracle_k": norm_shd_oracle,
         
         # Counts for debugging
-        "nnz_pred": len(E_hat),
+        "nnz_pred_threshold": len(E_hat_thresh),
+        "nnz_pred_oracle_k": len(E_hat_oracle),
         "m_true": m_true,
-        
-        # Selection info
-        "edge_select_mode": edge_select_mode,
-        "edge_threshold": edge_threshold if edge_select_mode == "threshold" else None,
+        "edge_threshold": edge_threshold,
         
         # Debug stats
         "p_edge_stats": p_edge_stats
@@ -307,16 +352,16 @@ def compute_all_edge_metrics(logits, labels, temperature=1.0,
 
 
 # =============================================================================
-# Legacy compatibility wrappers (to be removed after verification)
+# Legacy compatibility wrappers
 # =============================================================================
 
 def compute_directed_edge_set_f1(probs, labels, threshold=0.5, temperature=1.0):
-    """Legacy wrapper for compute_all_edge_metrics - F1 portion."""
-    result = compute_all_edge_metrics(probs, labels, temperature, "threshold", threshold)
-    return result["f1"], result["precision"], result["recall"], result["nnz_pred"]
+    """Legacy wrapper for compute_all_edge_metrics - F1 portion (threshold mode)."""
+    result = compute_all_edge_metrics(probs, labels, temperature, threshold)
+    return result["f1_threshold"], result["precision_threshold"], result["recall_threshold"], result["nnz_pred_threshold"]
 
 
 def compute_directed_edge_set_shd(probs, labels, threshold=0.5, temperature=1.0):
-    """Legacy wrapper for compute_all_edge_metrics - SHD portion."""
-    result = compute_all_edge_metrics(probs, labels, temperature, "threshold", threshold)
-    return result["shd"], result["normalized_shd"]
+    """Legacy wrapper for compute_all_edge_metrics - SHD portion (threshold mode)."""
+    result = compute_all_edge_metrics(probs, labels, temperature, threshold)
+    return result["shd_threshold"], result["normalized_shd_threshold"]

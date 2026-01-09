@@ -203,8 +203,13 @@ def main():
             key_to_metrics[key]["auc"].append(auc[i])
         if i < len(prc):
             key_to_metrics[key]["prc"].append(prc[i])
-        if "f1" in results_dict and i < len(results_dict["f1"]):
-            key_to_metrics[key]["f1"].append(results_dict["f1"][i])
+        
+        # F1 metrics - both threshold and oracle_k
+        if "f1_threshold" in results_dict and i < len(results_dict["f1_threshold"]):
+            key_to_metrics[key]["f1_threshold"].append(results_dict["f1_threshold"][i])
+        if "f1_oracle_k" in results_dict and i < len(results_dict["f1_oracle_k"]):
+            key_to_metrics[key]["f1_oracle_k"].append(results_dict["f1_oracle_k"][i])
+            
         if i < len(time_list):
             key_to_metrics[key]["time"].append(time_list[i])
         if i < len(true):
@@ -212,36 +217,57 @@ def main():
         if i < len(pred):
             key_to_metrics[key]["pred"].append(pred[i])
         
-        # Use pre-computed edge-set metrics from aggregator (ensures F1/SHD consistency)
-        if "shd" in results_dict and i < len(results_dict["shd"]):
-            key_to_metrics[key]["shd"].append(results_dict["shd"][i])
-        if "normalized_shd" in results_dict and i < len(results_dict["normalized_shd"]):
-            key_to_metrics[key]["normalized_shd"].append(results_dict["normalized_shd"][i])
-        if "nnz" in results_dict and i < len(results_dict["nnz"]):
-            key_to_metrics[key]["nnz"].append(results_dict["nnz"][i])
-        # New debug metrics
+        # THRESHOLD-based metrics from aggregator
+        if "shd_threshold" in results_dict and i < len(results_dict["shd_threshold"]):
+            key_to_metrics[key]["shd_threshold"].append(results_dict["shd_threshold"][i])
+        if "normalized_shd_threshold" in results_dict and i < len(results_dict["normalized_shd_threshold"]):
+            key_to_metrics[key]["normalized_shd_threshold"].append(results_dict["normalized_shd_threshold"][i])
+        if "nnz_threshold" in results_dict and i < len(results_dict["nnz_threshold"]):
+            key_to_metrics[key]["nnz_threshold"].append(results_dict["nnz_threshold"][i])
+        if "tp_threshold" in results_dict and i < len(results_dict["tp_threshold"]):
+            key_to_metrics[key]["tp_threshold"].append(results_dict["tp_threshold"][i])
+        if "fp_threshold" in results_dict and i < len(results_dict["fp_threshold"]):
+            key_to_metrics[key]["fp_threshold"].append(results_dict["fp_threshold"][i])
+        if "fn_threshold" in results_dict and i < len(results_dict["fn_threshold"]):
+            key_to_metrics[key]["fn_threshold"].append(results_dict["fn_threshold"][i])
+        if "precision_threshold" in results_dict and i < len(results_dict["precision_threshold"]):
+            key_to_metrics[key]["precision_threshold"].append(results_dict["precision_threshold"][i])
+        if "recall_threshold" in results_dict and i < len(results_dict["recall_threshold"]):
+            key_to_metrics[key]["recall_threshold"].append(results_dict["recall_threshold"][i])
+            
+        # ORACLE-K based metrics from aggregator
+        if "shd_oracle_k" in results_dict and i < len(results_dict["shd_oracle_k"]):
+            key_to_metrics[key]["shd_oracle_k"].append(results_dict["shd_oracle_k"][i])
+        if "normalized_shd_oracle_k" in results_dict and i < len(results_dict["normalized_shd_oracle_k"]):
+            key_to_metrics[key]["normalized_shd_oracle_k"].append(results_dict["normalized_shd_oracle_k"][i])
+        if "nnz_oracle_k" in results_dict and i < len(results_dict["nnz_oracle_k"]):
+            key_to_metrics[key]["nnz_oracle_k"].append(results_dict["nnz_oracle_k"][i])
+        if "tp_oracle_k" in results_dict and i < len(results_dict["tp_oracle_k"]):
+            key_to_metrics[key]["tp_oracle_k"].append(results_dict["tp_oracle_k"][i])
+        if "fp_oracle_k" in results_dict and i < len(results_dict["fp_oracle_k"]):
+            key_to_metrics[key]["fp_oracle_k"].append(results_dict["fp_oracle_k"][i])
+        if "fn_oracle_k" in results_dict and i < len(results_dict["fn_oracle_k"]):
+            key_to_metrics[key]["fn_oracle_k"].append(results_dict["fn_oracle_k"][i])
+        if "precision_oracle_k" in results_dict and i < len(results_dict["precision_oracle_k"]):
+            key_to_metrics[key]["precision_oracle_k"].append(results_dict["precision_oracle_k"][i])
+        if "recall_oracle_k" in results_dict and i < len(results_dict["recall_oracle_k"]):
+            key_to_metrics[key]["recall_oracle_k"].append(results_dict["recall_oracle_k"][i])
+        
+        # Common metadata
         if "m_true" in results_dict and i < len(results_dict["m_true"]):
             key_to_metrics[key]["m_true"].append(results_dict["m_true"][i])
-        if "tp" in results_dict and i < len(results_dict["tp"]):
-            key_to_metrics[key]["tp"].append(results_dict["tp"][i])
-        if "fp" in results_dict and i < len(results_dict["fp"]):
-            key_to_metrics[key]["fp"].append(results_dict["fp"][i])
-        if "fn" in results_dict and i < len(results_dict["fn"]):
-            key_to_metrics[key]["fn"].append(results_dict["fn"][i])
-        if "precision" in results_dict and i < len(results_dict["precision"]):
-            key_to_metrics[key]["precision"].append(results_dict["precision"][i])
         
         # Fallback: compute from pred/true if edge-set metrics not available (legacy mode)
-        if "shd" not in results_dict and i < len(pred) and i < len(true) and pred[i] and true[i]:
+        if "shd_threshold" not in results_dict and i < len(pred) and i < len(true) and pred[i] and true[i]:
             shd, norm_shd, nnz, sid, norm_sid = compute_structural_metrics(
                 pred[i], true[i]
             )
             if shd is not None:
-                key_to_metrics[key]["shd"].append(shd)
+                key_to_metrics[key]["shd_threshold"].append(shd)
             if norm_shd is not None:
-                key_to_metrics[key]["normalized_shd"].append(norm_shd)
+                key_to_metrics[key]["normalized_shd_threshold"].append(norm_shd)
             if nnz is not None:
-                key_to_metrics[key]["nnz"].append(nnz)
+                key_to_metrics[key]["nnz_threshold"].append(nnz)
             if sid is not None:
                 key_to_metrics[key]["sid"].append(sid)
             if norm_sid is not None:
