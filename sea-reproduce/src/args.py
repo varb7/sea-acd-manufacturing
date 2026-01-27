@@ -182,13 +182,9 @@ def get_parser():
                         help="Disable edge-set F1, use legacy metrics instead")
     
     # ==== edge selection policy ====
-    parser.add_argument("--edge_select_mode",
-                        type=str, default="threshold",
-                        choices=["threshold", "oracle_k"],
-                        help="Edge selection mode: 'threshold' (p_edge >= tau) or 'oracle_k' (top-k where k=|E*|)")
     parser.add_argument("--edge_threshold",
                         type=float, default=0.5,
-                        help="Threshold for edge selection (only used in threshold mode, default=0.5)")
+                        help="Threshold for edge selection in threshold mode (default=0.5)")
     
     return parser
 
