@@ -1,0 +1,30 @@
+data:
+  data_file: data/manufacturing_datasets/index.csv
+  debug: false
+  batch_size: 1
+  fci_vars: 5
+  fci_batches: 10
+  fci_batches_inference: 500
+  fci_batch_size: 500
+  num_workers: 40
+  accumulate_batches: 1
+  log_frequency: 10
+  results_file: data/manufacturing_datasets_results/results_cfci.pkl
+  use_learned_sampler: false
+model:
+  algorithm: cfci
+  model: aggregator
+  num_vars: 1000
+  num_edge_types: 8
+  embed_dim: 64
+  transformer_num_layers: 4
+  n_heads: 8
+  ffn_embed_dim: 8
+train:
+  run_name: sc-rl
+  patience: 50
+  epochs: 10000
+  min_epochs: 50
+  lr: 0.0001
+  weight_decay: 1.0e-05
+  metric: Val/auprc

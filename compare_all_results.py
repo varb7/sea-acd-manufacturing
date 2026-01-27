@@ -207,34 +207,125 @@ def load_all_results(result_files):
     return results, method_names
 
 
-def get_common_datasets(results_dict):
-    """Find datasets common to all result files."""
+def get_all_unique_datasets(results_dict):
+    """Find all unique datasets across result files."""
     if not results_dict:
         return set()
     
-    # Start with datasets from first file
-    common = set(list(results_dict.values())[0].keys())
-    
-    # Intersect with all other files
+    all_datasets = set()
     for results in results_dict.values():
-        common = common & set(results.keys())
+        all_datasets.update(results.keys())
     
-    return common
+    return all_datasets
+
+
+def create_long_format_table(results_dict, method_names, all_datasets):
+    """Create a long-format table for dataset-wise deep dive."""
+    data_rows = []
+    
+    for dataset in sorted(all_datasets):
+        for filepath, results in results_dict.items():
+            method_name = method_names[filepath]
+            
+            # Use safe get
+            if dataset not in results:
+                continue
+                
+            data = results[dataset]
+            metrics = compute_metrics(data)
+            
+            row = {
+                "Dataset": dataset,
+                "Method": method_name,
+                "AUC_Mean": metrics.get("auc_mean"),
+                "AUC_Std": metrics.get("auc_std"),
+                "AUPRC_Mean": metrics.get("prc_mean"),
+                "AUPRC_Std": metrics.get("prc_std"),
+                # F1 - both threshold and oracle_k
+                "F1_Threshold_Mean": metrics.get("f1_threshold_mean"),
+                "F1_Threshold_Std": metrics.get("f1_threshold_std"),
+                "F1_OracleK_Mean": metrics.get("f1_oracle_k_mean"),
+                "F1_OracleK_Std": metrics.get("f1_oracle_k_std"),
+                # Time
+                "Time_Mean": metrics.get("time_mean"),
+                "Time_Std": metrics.get("time_std"),
+                # SHD - both threshold and oracle_k
+                "SHD_Threshold_Mean": metrics.get("shd_threshold_mean"),
+                "SHD_Threshold_Std": metrics.get("shd_threshold_std"),
+                "SHD_OracleK_Mean": metrics.get("shd_oracle_k_mean"),
+                "SHD_OracleK_Std": metrics.get("shd_oracle_k_std"),
+                # Normalized SHD
+                "Norm_SHD_Threshold_Mean": metrics.get("normalized_shd_threshold_mean"),
+                "Norm_SHD_Threshold_Std": metrics.get("normalized_shd_threshold_std"),
+                "Norm_SHD_OracleK_Mean": metrics.get("normalized_shd_oracle_k_mean"),
+                "Norm_SHD_OracleK_Std": metrics.get("normalized_shd_oracle_k_std"),
+                # NNZ
+                "NNZ_Threshold_Mean": metrics.get("nnz_threshold_mean"),
+                "NNZ_Threshold_Std": metrics.get("nnz_threshold_std"),
+                "NNZ_OracleK_Mean": metrics.get("nnz_oracle_k_mean"),
+                "NNZ_OracleK_Std": metrics.get("nnz_oracle_k_std"),
+                # Precision/Recall
+                "Precision_Threshold_Mean": metrics.get("precision_threshold_mean"),
+                "Recall_Threshold_Mean": metrics.get("recall_threshold_mean"),
+                "Precision_OracleK_Mean": metrics.get("precision_oracle_k_mean"),
+                "Recall_OracleK_Mean": metrics.get("recall_oracle_k_mean"),
+                # Other
+                "SID_Mean": metrics.get("sid_mean"),
+                "SID_Std": metrics.get("sid_std"),
+                "Norm_SID_Mean": metrics.get("normalized_sid_mean"),
+                "Norm_SID_Std": metrics.get("normalized_sid_std"),
+                "M_True_Mean": metrics.get("m_true_mean"),
+                "N_Samples": metrics.get("n_samples")
+            }
+            data_rows.append(row)
+            
+    return pd.DataFrame(data_rows)
 
 
 def compute_metrics(data):
-    """Compute mean and std for metrics in a dataset."""
-    auc_scores = [s for s in data.get("auc", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
-    prc_scores = [s for s in data.get("prc", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
-    f1_scores = [s for s in data.get("f1", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
-    times = [s for s in data.get("time", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    """Compute mean and std for metrics in a dataset.
     
-    # New metrics
-    shd_scores = [s for s in data.get("shd", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
-    normalized_shd_scores = [s for s in data.get("normalized_shd", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
-    nnz_scores = [s for s in data.get("nnz", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
-    sid_scores = [s for s in data.get("sid", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
-    normalized_sid_scores = [s for s in data.get("normalized_sid", []) if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    Supports both new metric names (f1_threshold, f1_oracle_k, shd_threshold, shd_oracle_k)
+    and legacy names (f1, shd) for backward compatibility.
+    """
+    def safe_filter(values):
+        """Filter out None and NaN values."""
+        return [s for s in values if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    
+    auc_scores = safe_filter(data.get("auc", []))
+    prc_scores = safe_filter(data.get("prc", []))
+    times = safe_filter(data.get("time", []))
+    
+    # F1 metrics - support both new and legacy names
+    # New: f1_threshold, f1_oracle_k | Legacy: f1
+    f1_threshold = safe_filter(data.get("f1_threshold", []))
+    f1_oracle_k = safe_filter(data.get("f1_oracle_k", []))
+    f1_legacy = safe_filter(data.get("f1", []))
+    
+    # SHD metrics - support both new and legacy names
+    shd_threshold = safe_filter(data.get("shd_threshold", []))
+    shd_oracle_k = safe_filter(data.get("shd_oracle_k", []))
+    shd_legacy = safe_filter(data.get("shd", []))
+    
+    normalized_shd_threshold = safe_filter(data.get("normalized_shd_threshold", []))
+    normalized_shd_oracle_k = safe_filter(data.get("normalized_shd_oracle_k", []))
+    normalized_shd_legacy = safe_filter(data.get("normalized_shd", []))
+    
+    # NNZ metrics
+    nnz_threshold = safe_filter(data.get("nnz_threshold", []))
+    nnz_oracle_k = safe_filter(data.get("nnz_oracle_k", []))
+    nnz_legacy = safe_filter(data.get("nnz", []))
+    
+    # Precision/Recall
+    precision_threshold = safe_filter(data.get("precision_threshold", []))
+    precision_oracle_k = safe_filter(data.get("precision_oracle_k", []))
+    recall_threshold = safe_filter(data.get("recall_threshold", []))
+    recall_oracle_k = safe_filter(data.get("recall_oracle_k", []))
+    
+    # Other metrics
+    sid_scores = safe_filter(data.get("sid", []))
+    normalized_sid_scores = safe_filter(data.get("normalized_sid", []))
+    m_true = safe_filter(data.get("m_true", []))
     
     metrics = {
         "auc_mean": np.mean(auc_scores) if auc_scores else None,
@@ -244,22 +335,51 @@ def compute_metrics(data):
         "time_mean": np.mean(times) if times else None,
         "time_std": np.std(times) if times else None,
         "n_samples": len(auc_scores) if auc_scores else 0,
-
-        # New metric
-        "f1_mean": np.mean(f1_scores) if f1_scores else None,
-        "f1_std": np.std(f1_scores) if f1_scores else None,
         
-        # New metrics
-        "shd_mean": np.mean(shd_scores) if shd_scores else None,
-        "shd_std": np.std(shd_scores) if shd_scores else None,
-        "normalized_shd_mean": np.mean(normalized_shd_scores) if normalized_shd_scores else None,
-        "normalized_shd_std": np.std(normalized_shd_scores) if normalized_shd_scores else None,
-        "nnz_mean": np.mean(nnz_scores) if nnz_scores else None,
-        "nnz_std": np.std(nnz_scores) if nnz_scores else None,
+        # F1 THRESHOLD (use new if available, fallback to legacy)
+        "f1_threshold_mean": np.mean(f1_threshold) if f1_threshold else (np.mean(f1_legacy) if f1_legacy else None),
+        "f1_threshold_std": np.std(f1_threshold) if f1_threshold else (np.std(f1_legacy) if f1_legacy else None),
+        
+        # F1 ORACLE-K (only available in new format)
+        "f1_oracle_k_mean": np.mean(f1_oracle_k) if f1_oracle_k else None,
+        "f1_oracle_k_std": np.std(f1_oracle_k) if f1_oracle_k else None,
+        
+        # SHD THRESHOLD (use new if available, fallback to legacy)
+        "shd_threshold_mean": np.mean(shd_threshold) if shd_threshold else (np.mean(shd_legacy) if shd_legacy else None),
+        "shd_threshold_std": np.std(shd_threshold) if shd_threshold else (np.std(shd_legacy) if shd_legacy else None),
+        
+        # SHD ORACLE-K (only available in new format)
+        "shd_oracle_k_mean": np.mean(shd_oracle_k) if shd_oracle_k else None,
+        "shd_oracle_k_std": np.std(shd_oracle_k) if shd_oracle_k else None,
+        
+        # Normalized SHD
+        "normalized_shd_threshold_mean": np.mean(normalized_shd_threshold) if normalized_shd_threshold else (np.mean(normalized_shd_legacy) if normalized_shd_legacy else None),
+        "normalized_shd_threshold_std": np.std(normalized_shd_threshold) if normalized_shd_threshold else (np.std(normalized_shd_legacy) if normalized_shd_legacy else None),
+        "normalized_shd_oracle_k_mean": np.mean(normalized_shd_oracle_k) if normalized_shd_oracle_k else None,
+        "normalized_shd_oracle_k_std": np.std(normalized_shd_oracle_k) if normalized_shd_oracle_k else None,
+        
+        # NNZ
+        "nnz_threshold_mean": np.mean(nnz_threshold) if nnz_threshold else (np.mean(nnz_legacy) if nnz_legacy else None),
+        "nnz_threshold_std": np.std(nnz_threshold) if nnz_threshold else (np.std(nnz_legacy) if nnz_legacy else None),
+        "nnz_oracle_k_mean": np.mean(nnz_oracle_k) if nnz_oracle_k else None,
+        "nnz_oracle_k_std": np.std(nnz_oracle_k) if nnz_oracle_k else None,
+        
+        # Precision/Recall
+        "precision_threshold_mean": np.mean(precision_threshold) if precision_threshold else None,
+        "precision_threshold_std": np.std(precision_threshold) if precision_threshold else None,
+        "precision_oracle_k_mean": np.mean(precision_oracle_k) if precision_oracle_k else None,
+        "precision_oracle_k_std": np.std(precision_oracle_k) if precision_oracle_k else None,
+        "recall_threshold_mean": np.mean(recall_threshold) if recall_threshold else None,
+        "recall_threshold_std": np.std(recall_threshold) if recall_threshold else None,
+        "recall_oracle_k_mean": np.mean(recall_oracle_k) if recall_oracle_k else None,
+        "recall_oracle_k_std": np.std(recall_oracle_k) if recall_oracle_k else None,
+        
+        # Other metrics
         "sid_mean": np.mean(sid_scores) if sid_scores else None,
         "sid_std": np.std(sid_scores) if sid_scores else None,
         "normalized_sid_mean": np.mean(normalized_sid_scores) if normalized_sid_scores else None,
         "normalized_sid_std": np.std(normalized_sid_scores) if normalized_sid_scores else None,
+        "m_true_mean": np.mean(m_true) if m_true else None,
     }
     
     return metrics
@@ -274,6 +394,11 @@ def create_comparison_table(results_dict, method_names, common_datasets):
         
         for filepath, results in results_dict.items():
             method_name = method_names[filepath]
+            
+            # Handle missing datasets
+            if dataset not in results:
+                continue
+                
             data = results[dataset]
             metrics = compute_metrics(data)
             
@@ -282,22 +407,50 @@ def create_comparison_table(results_dict, method_names, common_datasets):
             row[f"{method_name}_AUC_std"] = metrics["auc_std"]
             row[f"{method_name}_AUPRC"] = metrics["prc_mean"]
             row[f"{method_name}_AUPRC_std"] = metrics["prc_std"]
-            row[f"{method_name}_F1"] = metrics["f1_mean"]
-            row[f"{method_name}_F1_std"] = metrics["f1_std"]
+            
+            # F1 - threshold and oracle_k
+            row[f"{method_name}_F1_Thresh"] = metrics["f1_threshold_mean"]
+            row[f"{method_name}_F1_Thresh_std"] = metrics["f1_threshold_std"]
+            row[f"{method_name}_F1_OracleK"] = metrics["f1_oracle_k_mean"]
+            row[f"{method_name}_F1_OracleK_std"] = metrics["f1_oracle_k_std"]
+            
             row[f"{method_name}_Time"] = metrics["time_mean"]
             row[f"{method_name}_Time_std"] = metrics["time_std"]
             row[f"{method_name}_N"] = metrics["n_samples"]
             
-            # Add new metrics if available
-            if metrics["shd_mean"] is not None:
-                row[f"{method_name}_SHD"] = metrics["shd_mean"]
-                row[f"{method_name}_SHD_std"] = metrics["shd_std"]
-            if metrics["normalized_shd_mean"] is not None:
-                row[f"{method_name}_Norm_SHD"] = metrics["normalized_shd_mean"]
-                row[f"{method_name}_Norm_SHD_std"] = metrics["normalized_shd_std"]
-            if metrics["nnz_mean"] is not None:
-                row[f"{method_name}_NNZ"] = metrics["nnz_mean"]
-                row[f"{method_name}_NNZ_std"] = metrics["nnz_std"]
+            # SHD - threshold and oracle_k
+            if metrics["shd_threshold_mean"] is not None:
+                row[f"{method_name}_SHD_Thresh"] = metrics["shd_threshold_mean"]
+                row[f"{method_name}_SHD_Thresh_std"] = metrics["shd_threshold_std"]
+            if metrics["shd_oracle_k_mean"] is not None:
+                row[f"{method_name}_SHD_OracleK"] = metrics["shd_oracle_k_mean"]
+                row[f"{method_name}_SHD_OracleK_std"] = metrics["shd_oracle_k_std"]
+            
+            # Normalized SHD
+            if metrics["normalized_shd_threshold_mean"] is not None:
+                row[f"{method_name}_Norm_SHD_Thresh"] = metrics["normalized_shd_threshold_mean"]
+            if metrics["normalized_shd_oracle_k_mean"] is not None:
+                row[f"{method_name}_Norm_SHD_OracleK"] = metrics["normalized_shd_oracle_k_mean"]
+            
+            # NNZ
+            if metrics["nnz_threshold_mean"] is not None:
+                row[f"{method_name}_NNZ_Thresh"] = metrics["nnz_threshold_mean"]
+            if metrics["nnz_oracle_k_mean"] is not None:
+                row[f"{method_name}_NNZ_OracleK"] = metrics["nnz_oracle_k_mean"]
+            
+            # Precision/Recall
+            if metrics["precision_threshold_mean"] is not None:
+                row[f"{method_name}_Prec_Thresh"] = metrics["precision_threshold_mean"]
+                row[f"{method_name}_Recall_Thresh"] = metrics["recall_threshold_mean"]
+            if metrics["precision_oracle_k_mean"] is not None:
+                row[f"{method_name}_Prec_OracleK"] = metrics["precision_oracle_k_mean"]
+                row[f"{method_name}_Recall_OracleK"] = metrics["recall_oracle_k_mean"]
+            
+            # M_True (ground truth edge count)
+            if metrics["m_true_mean"] is not None:
+                row[f"{method_name}_M_True"] = metrics["m_true_mean"]
+            
+            # SID
             if metrics["sid_mean"] is not None:
                 row[f"{method_name}_SID"] = metrics["sid_mean"]
                 row[f"{method_name}_SID_std"] = metrics["sid_std"]
@@ -314,42 +467,70 @@ def create_summary_table(results_dict, method_names, common_datasets):
     """Create a summary table with overall averages."""
     summary_data = []
     
+    def safe_filter(values):
+        """Filter out None and NaN values."""
+        return [s for s in values if s is not None and not (isinstance(s, float) and np.isnan(s))]
+    
     for filepath, results in results_dict.items():
         method_name = method_names[filepath]
         
         all_auc = []
         all_prc = []
-        all_f1 = []
+        all_f1_threshold = []
+        all_f1_oracle_k = []
         all_times = []
-        all_shd = []
-        all_normalized_shd = []
-        all_nnz = []
+        all_shd_threshold = []
+        all_shd_oracle_k = []
+        all_normalized_shd_threshold = []
+        all_normalized_shd_oracle_k = []
+        all_nnz_threshold = []
+        all_nnz_oracle_k = []
         all_sid = []
         all_normalized_sid = []
         total_samples = 0
         
         for dataset in common_datasets:
+            # Handle missing datasets
+            if dataset not in results:
+                continue
+                
             data = results[dataset]
-            auc_scores = data.get("auc", [])
-            prc_scores = data.get("prc", [])
-            f1_scores = data.get("f1", [])
-            times = data.get("time", [])
-            shd_scores = [s for s in data.get("shd", []) if s is not None]
-            normalized_shd_scores = [s for s in data.get("normalized_shd", []) if s is not None]
-            nnz_scores = [s for s in data.get("nnz", []) if s is not None]
-            sid_scores = [s for s in data.get("sid", []) if s is not None]
-            normalized_sid_scores = [s for s in data.get("normalized_sid", []) if s is not None]
-
-            all_auc.extend(auc_scores)
-            all_prc.extend(prc_scores)
-            all_f1.extend(f1_scores)
-            all_times.extend(times)
-            all_shd.extend(shd_scores)
-            all_normalized_shd.extend(normalized_shd_scores)
-            all_nnz.extend(nnz_scores)
-            all_sid.extend(sid_scores)
-            all_normalized_sid.extend(normalized_sid_scores)
-            total_samples += len(auc_scores)
+            all_auc.extend(safe_filter(data.get("auc", [])))
+            all_prc.extend(safe_filter(data.get("prc", [])))
+            all_times.extend(safe_filter(data.get("time", [])))
+            
+            # F1: new names first, then legacy fallback
+            f1_thresh = safe_filter(data.get("f1_threshold", []))
+            f1_oracle = safe_filter(data.get("f1_oracle_k", []))
+            f1_legacy = safe_filter(data.get("f1", []))
+            all_f1_threshold.extend(f1_thresh if f1_thresh else f1_legacy)
+            all_f1_oracle_k.extend(f1_oracle)
+            
+            # SHD: new names first, then legacy fallback
+            shd_thresh = safe_filter(data.get("shd_threshold", []))
+            shd_oracle = safe_filter(data.get("shd_oracle_k", []))
+            shd_legacy = safe_filter(data.get("shd", []))
+            all_shd_threshold.extend(shd_thresh if shd_thresh else shd_legacy)
+            all_shd_oracle_k.extend(shd_oracle)
+            
+            # Normalized SHD
+            norm_shd_thresh = safe_filter(data.get("normalized_shd_threshold", []))
+            norm_shd_oracle = safe_filter(data.get("normalized_shd_oracle_k", []))
+            norm_shd_legacy = safe_filter(data.get("normalized_shd", []))
+            all_normalized_shd_threshold.extend(norm_shd_thresh if norm_shd_thresh else norm_shd_legacy)
+            all_normalized_shd_oracle_k.extend(norm_shd_oracle)
+            
+            # NNZ
+            nnz_thresh = safe_filter(data.get("nnz_threshold", []))
+            nnz_oracle = safe_filter(data.get("nnz_oracle_k", []))
+            nnz_legacy = safe_filter(data.get("nnz", []))
+            all_nnz_threshold.extend(nnz_thresh if nnz_thresh else nnz_legacy)
+            all_nnz_oracle_k.extend(nnz_oracle)
+            
+            # Other metrics
+            all_sid.extend(safe_filter(data.get("sid", [])))
+            all_normalized_sid.extend(safe_filter(data.get("normalized_sid", [])))
+            total_samples += len(safe_filter(data.get("auc", [])))
         
         summary_data.append({
             "Method": method_name,
@@ -357,16 +538,30 @@ def create_summary_table(results_dict, method_names, common_datasets):
             "AUC_std": np.std(all_auc) if all_auc else None,
             "Avg_AUPRC": np.mean(all_prc) if all_prc else None,
             "AUPRC_std": np.std(all_prc) if all_prc else None,
-            "Avg_F1": np.mean(all_f1) if all_f1 else None,
-            "F1_std": np.std(all_f1) if all_f1 else None,
+            # F1 - threshold and oracle_k
+            "Avg_F1_Thresh": np.mean(all_f1_threshold) if all_f1_threshold else None,
+            "F1_Thresh_std": np.std(all_f1_threshold) if all_f1_threshold else None,
+            "Avg_F1_OracleK": np.mean(all_f1_oracle_k) if all_f1_oracle_k else None,
+            "F1_OracleK_std": np.std(all_f1_oracle_k) if all_f1_oracle_k else None,
+            # Time
             "Avg_Time": np.mean(all_times) if all_times else None,
             "Time_std": np.std(all_times) if all_times else None,
-            "Avg_SHD": np.mean(all_shd) if all_shd else None,
-            "SHD_std": np.std(all_shd) if all_shd else None,
-            "Avg_Norm_SHD": np.mean(all_normalized_shd) if all_normalized_shd else None,
-            "Norm_SHD_std": np.std(all_normalized_shd) if all_normalized_shd else None,
-            "Avg_NNZ": np.mean(all_nnz) if all_nnz else None,
-            "NNZ_std": np.std(all_nnz) if all_nnz else None,
+            # SHD - threshold and oracle_k
+            "Avg_SHD_Thresh": np.mean(all_shd_threshold) if all_shd_threshold else None,
+            "SHD_Thresh_std": np.std(all_shd_threshold) if all_shd_threshold else None,
+            "Avg_SHD_OracleK": np.mean(all_shd_oracle_k) if all_shd_oracle_k else None,
+            "SHD_OracleK_std": np.std(all_shd_oracle_k) if all_shd_oracle_k else None,
+            # Normalized SHD
+            "Avg_Norm_SHD_Thresh": np.mean(all_normalized_shd_threshold) if all_normalized_shd_threshold else None,
+            "Norm_SHD_Thresh_std": np.std(all_normalized_shd_threshold) if all_normalized_shd_threshold else None,
+            "Avg_Norm_SHD_OracleK": np.mean(all_normalized_shd_oracle_k) if all_normalized_shd_oracle_k else None,
+            "Norm_SHD_OracleK_std": np.std(all_normalized_shd_oracle_k) if all_normalized_shd_oracle_k else None,
+            # NNZ
+            "Avg_NNZ_Thresh": np.mean(all_nnz_threshold) if all_nnz_threshold else None,
+            "NNZ_Thresh_std": np.std(all_nnz_threshold) if all_nnz_threshold else None,
+            "Avg_NNZ_OracleK": np.mean(all_nnz_oracle_k) if all_nnz_oracle_k else None,
+            "NNZ_OracleK_std": np.std(all_nnz_oracle_k) if all_nnz_oracle_k else None,
+            # Other
             "Avg_SID": np.mean(all_sid) if all_sid else None,
             "SID_std": np.std(all_sid) if all_sid else None,
             "Avg_Norm_SID": np.mean(all_normalized_sid) if all_normalized_sid else None,
@@ -387,6 +582,12 @@ def print_detailed_comparison(df, method_names):
     # Create a simplified view for readability
     methods = list(method_names.values())
     
+    # Helper function to format values with None/NaN handling
+    def fmt(v, decimals=3):
+        if pd.isna(v) or v is None:
+            return "N/A"
+        return f"{v:.{decimals}f}"
+    
     # Print AUC comparison
     print("\n--- AUC Scores (Mean ± Std) ---")
     auc_cols = ["Dataset"] + [f"{m}_AUC" for m in methods]
@@ -397,7 +598,7 @@ def print_detailed_comparison(df, method_names):
             col_mean = f"{method}_AUC"
             col_std = f"{method}_AUC_std"
             if col_mean in df.columns and col_std in df.columns:
-                auc_df[method] = df[col_mean].apply(lambda x: f"{x:.3f}") + " ± " + df[col_std].apply(lambda x: f"{x:.3f}")
+                auc_df[method] = df[col_mean].apply(lambda x: fmt(x)) + " ± " + df[col_std].apply(lambda x: fmt(x))
         display_cols = ["Dataset"] + methods
         print(auc_df[display_cols].to_string(index=False))
     
@@ -410,7 +611,7 @@ def print_detailed_comparison(df, method_names):
             col_mean = f"{method}_AUPRC"
             col_std = f"{method}_AUPRC_std"
             if col_mean in df.columns and col_std in df.columns:
-                prc_df[method] = df[col_mean].apply(lambda x: f"{x:.3f}") + " ± " + df[col_std].apply(lambda x: f"{x:.3f}")
+                prc_df[method] = df[col_mean].apply(lambda x: fmt(x)) + " ± " + df[col_std].apply(lambda x: fmt(x))
         display_cols = ["Dataset"] + methods
         print(prc_df[display_cols].to_string(index=False))
     
@@ -423,9 +624,7 @@ def print_detailed_comparison(df, method_names):
             col_mean = f"{method}_F1"
             col_std = f"{method}_F1_std"
             if col_mean in df.columns and col_std in df.columns:
-                def fmt(v):
-                    return "N/A" if pd.isna(v) or v is None else f"{v:.3f}"
-                f1_df[method] = df[col_mean].apply(fmt) + " ± " + df[col_std].apply(fmt)
+                f1_df[method] = df[col_mean].apply(lambda x: fmt(x)) + " ± " + df[col_std].apply(lambda x: fmt(x))
         display_cols = ["Dataset"] + methods
         print(f1_df[display_cols].to_string(index=False))
     
@@ -438,7 +637,7 @@ def print_detailed_comparison(df, method_names):
             col_mean = f"{method}_Time"
             col_std = f"{method}_Time_std"
             if col_mean in df.columns and col_std in df.columns:
-                time_df[method] = df[col_mean].apply(lambda x: f"{x:.2f}") + " ± " + df[col_std].apply(lambda x: f"{x:.2f}")
+                time_df[method] = df[col_mean].apply(lambda x: fmt(x, 2)) + " ± " + df[col_std].apply(lambda x: fmt(x, 2))
         display_cols = ["Dataset"] + methods
         print(time_df[display_cols].to_string(index=False))
     
@@ -503,10 +702,10 @@ def print_summary(summary_df):
     # Format AUC with NaN handling
     def format_with_std(mean_col, std_col, decimals=3):
         def formatter(row):
-            mean_val = row[mean_col]
-            std_val = row[std_col]
-            if pd.isna(mean_val) or mean_val is None:
+            if mean_col not in row or pd.isna(row[mean_col]) or row[mean_col] is None:
                 return "N/A"
+            mean_val = row[mean_col]
+            std_val = row.get(std_col, 0.0)
             if pd.isna(std_val) or std_val is None:
                 std_val = 0.0
             return f"{mean_val:.{decimals}f} ± {std_val:.{decimals}f}"
@@ -514,32 +713,28 @@ def print_summary(summary_df):
     
     formatted_df["AUC"] = formatted_df.apply(format_with_std("Avg_AUC", "AUC_std", 3), axis=1)
     formatted_df["AUPRC"] = formatted_df.apply(format_with_std("Avg_AUPRC", "AUPRC_std", 3), axis=1)
-    formatted_df["F1"] = formatted_df.apply(format_with_std("Avg_F1", "F1_std", 3), axis=1)
+    formatted_df["F1_Thresh"] = formatted_df.apply(format_with_std("Avg_F1_Thresh", "F1_Thresh_std", 3), axis=1)
+    formatted_df["F1_OracleK"] = formatted_df.apply(format_with_std("Avg_F1_OracleK", "F1_OracleK_std", 3), axis=1)
     formatted_df["Time"] = formatted_df.apply(format_with_std("Avg_Time", "Time_std", 2), axis=1)
     
-    # Format new metrics (handle None values)
-    def format_metric(mean_col, std_col):
-        def formatter(row):
-            if pd.isna(row[mean_col]) or row[mean_col] is None:
-                return "N/A"
-            mean_val = row[mean_col]
-            std_val = row[std_col] if not pd.isna(row[std_col]) and row[std_col] is not None else 0.0
-            if "SHD" in mean_col or "SID" in mean_col:
-                return f"{mean_val:.2f} ± {std_val:.2f}"
-            else:
-                return f"{mean_val:.1f} ± {std_val:.1f}"
-        return formatter
+    # Format SHD metrics
+    formatted_df["SHD_Thresh"] = formatted_df.apply(format_with_std("Avg_SHD_Thresh", "SHD_Thresh_std", 1), axis=1)
+    formatted_df["SHD_OracleK"] = formatted_df.apply(format_with_std("Avg_SHD_OracleK", "SHD_OracleK_std", 1), axis=1)
+    formatted_df["Norm_SHD_Thresh"] = formatted_df.apply(format_with_std("Avg_Norm_SHD_Thresh", "Norm_SHD_Thresh_std", 3), axis=1)
+    formatted_df["NNZ_Thresh"] = formatted_df.apply(format_with_std("Avg_NNZ_Thresh", "NNZ_Thresh_std", 1), axis=1)
+    formatted_df["SID"] = formatted_df.apply(format_with_std("Avg_SID", "SID_std", 1), axis=1)
+    formatted_df["Norm_SID"] = formatted_df.apply(format_with_std("Avg_Norm_SID", "Norm_SID_std", 3), axis=1)
     
-    formatted_df["SHD"] = formatted_df.apply(format_metric("Avg_SHD", "SHD_std"), axis=1)
-    formatted_df["Norm_SHD"] = formatted_df.apply(format_metric("Avg_Norm_SHD", "Norm_SHD_std"), axis=1)
-    formatted_df["NNZ"] = formatted_df.apply(format_metric("Avg_NNZ", "NNZ_std"), axis=1)
-    formatted_df["SID"] = formatted_df.apply(format_metric("Avg_SID", "SID_std"), axis=1)
-    formatted_df["Norm_SID"] = formatted_df.apply(format_metric("Avg_Norm_SID", "Norm_SID_std"), axis=1)
-    
-    display_cols = ["Method", "AUC", "AUPRC", "F1", "Time", "SHD", "Norm_SHD", "NNZ"]
-    if formatted_df["SID"].notna().any():
-        display_cols.extend(["SID", "Norm_SID"])
+    # Primary metrics display
+    display_cols = ["Method", "AUC", "AUPRC", "F1_Thresh", "F1_OracleK", "Time", "SHD_Thresh", "SHD_OracleK"]
+    optional_cols = ["Norm_SHD_Thresh", "NNZ_Thresh"]
+    for col in optional_cols:
+        if col in formatted_df.columns and formatted_df[col].apply(lambda x: x != "N/A").any():
+            display_cols.append(col)
     display_cols.extend(["Total_Samples", "Num_Datasets"])
+    
+    # Only include columns that exist
+    display_cols = [c for c in display_cols if c in formatted_df.columns]
     print(formatted_df[display_cols].to_string(index=False))
     
     # Find best performers
@@ -548,34 +743,39 @@ def print_summary(summary_df):
     print("-"*80)
     
     # Handle NaN values - only find best if there are valid values
-    if summary_df["Avg_AUC"].notna().any():
+    if "Avg_AUC" in summary_df.columns and summary_df["Avg_AUC"].notna().any():
         best_auc_idx = summary_df["Avg_AUC"].idxmax()
         print(f"Best AUC:  {summary_df.loc[best_auc_idx, 'Method']} ({summary_df.loc[best_auc_idx, 'Avg_AUC']:.3f})")
     else:
         print("Best AUC:  N/A (no valid data)")
     
-    if summary_df["Avg_AUPRC"].notna().any():
+    if "Avg_AUPRC" in summary_df.columns and summary_df["Avg_AUPRC"].notna().any():
         best_prc_idx = summary_df["Avg_AUPRC"].idxmax()
         print(f"Best AUPRC: {summary_df.loc[best_prc_idx, 'Method']} ({summary_df.loc[best_prc_idx, 'Avg_AUPRC']:.3f})")
     else:
         print("Best AUPRC: N/A (no valid data)")
     
-    if summary_df["Avg_Time"].notna().any():
+    # F1 best performers
+    if "Avg_F1_Thresh" in summary_df.columns and summary_df["Avg_F1_Thresh"].notna().any():
+        best_f1_idx = summary_df["Avg_F1_Thresh"].idxmax()
+        print(f"Best F1 (Threshold): {summary_df.loc[best_f1_idx, 'Method']} ({summary_df.loc[best_f1_idx, 'Avg_F1_Thresh']:.3f})")
+    if "Avg_F1_OracleK" in summary_df.columns and summary_df["Avg_F1_OracleK"].notna().any():
+        best_f1_oracle_idx = summary_df["Avg_F1_OracleK"].idxmax()
+        print(f"Best F1 (Oracle-K): {summary_df.loc[best_f1_oracle_idx, 'Method']} ({summary_df.loc[best_f1_oracle_idx, 'Avg_F1_OracleK']:.3f})")
+    
+    if "Avg_Time" in summary_df.columns and summary_df["Avg_Time"].notna().any():
         fastest_idx = summary_df["Avg_Time"].idxmin()
         print(f"Fastest:   {summary_df.loc[fastest_idx, 'Method']} ({summary_df.loc[fastest_idx, 'Avg_Time']:.2f}s)")
     else:
         print("Fastest:   N/A (no valid data)")
     
-    # Best performers for new metrics (lower is better for SHD/SID)
-    if summary_df["Avg_SHD"].notna().any():
-        best_shd_idx = summary_df["Avg_SHD"].idxmin()
-        print(f"Best SHD (lowest): {summary_df.loc[best_shd_idx, 'Method']} ({summary_df.loc[best_shd_idx, 'Avg_SHD']:.2f})")
-    if summary_df["Avg_Norm_SHD"].notna().any():
-        best_norm_shd_idx = summary_df["Avg_Norm_SHD"].idxmin()
-        print(f"Best Norm SHD (lowest): {summary_df.loc[best_norm_shd_idx, 'Method']} ({summary_df.loc[best_norm_shd_idx, 'Avg_Norm_SHD']:.3f})")
-    if summary_df["Avg_SID"].notna().any():
-        best_sid_idx = summary_df["Avg_SID"].idxmin()
-        print(f"Best SID (lowest): {summary_df.loc[best_sid_idx, 'Method']} ({summary_df.loc[best_sid_idx, 'Avg_SID']:.2f})")
+    # Best performers for SHD (lower is better)
+    if "Avg_SHD_Thresh" in summary_df.columns and summary_df["Avg_SHD_Thresh"].notna().any():
+        best_shd_idx = summary_df["Avg_SHD_Thresh"].idxmin()
+        print(f"Best SHD (Threshold, lowest): {summary_df.loc[best_shd_idx, 'Method']} ({summary_df.loc[best_shd_idx, 'Avg_SHD_Thresh']:.1f})")
+    if "Avg_SHD_OracleK" in summary_df.columns and summary_df["Avg_SHD_OracleK"].notna().any():
+        best_shd_oracle_idx = summary_df["Avg_SHD_OracleK"].idxmin()
+        print(f"Best SHD (Oracle-K, lowest): {summary_df.loc[best_shd_oracle_idx, 'Method']} ({summary_df.loc[best_shd_oracle_idx, 'Avg_SHD_OracleK']:.1f})")
 
 
 def print_rankings(summary_df):
@@ -585,49 +785,78 @@ def print_rankings(summary_df):
     print("="*80)
     
     # Rank by AUC (higher is better)
-    summary_df["AUC_Rank"] = summary_df["Avg_AUC"].rank(ascending=False, method="min")
+    if "Avg_AUC" in summary_df.columns:
+        summary_df["AUC_Rank"] = summary_df["Avg_AUC"].rank(ascending=False, method="min")
     # Rank by AUPRC (higher is better)
-    summary_df["AUPRC_Rank"] = summary_df["Avg_AUPRC"].rank(ascending=False, method="min")
-    # Rank by F1 (higher is better)
-    summary_df["F1_Rank"] = summary_df["Avg_F1"].rank(ascending=False, method="min")
+    if "Avg_AUPRC" in summary_df.columns:
+        summary_df["AUPRC_Rank"] = summary_df["Avg_AUPRC"].rank(ascending=False, method="min")
+    # Rank by F1 Threshold (higher is better)
+    if "Avg_F1_Thresh" in summary_df.columns:
+        summary_df["F1_Thresh_Rank"] = summary_df["Avg_F1_Thresh"].rank(ascending=False, method="min")
+    # Rank by F1 Oracle-K (higher is better)
+    if "Avg_F1_OracleK" in summary_df.columns:
+        summary_df["F1_OracleK_Rank"] = summary_df["Avg_F1_OracleK"].rank(ascending=False, method="min")
     # Rank by Time (lower is better)
-    summary_df["Time_Rank"] = summary_df["Avg_Time"].rank(ascending=True, method="min")
+    if "Avg_Time" in summary_df.columns:
+        summary_df["Time_Rank"] = summary_df["Avg_Time"].rank(ascending=True, method="min")
     
-    # Rank by new metrics (lower is better for SHD/SID)
-    if summary_df["Avg_SHD"].notna().any():
-        summary_df["SHD_Rank"] = summary_df["Avg_SHD"].rank(ascending=True, method="min")
-    if summary_df["Avg_Norm_SHD"].notna().any():
-        summary_df["Norm_SHD_Rank"] = summary_df["Avg_Norm_SHD"].rank(ascending=True, method="min")
-    if summary_df["Avg_SID"].notna().any():
+    # Rank by SHD (lower is better)
+    if "Avg_SHD_Thresh" in summary_df.columns and summary_df["Avg_SHD_Thresh"].notna().any():
+        summary_df["SHD_Thresh_Rank"] = summary_df["Avg_SHD_Thresh"].rank(ascending=True, method="min")
+    if "Avg_SHD_OracleK" in summary_df.columns and summary_df["Avg_SHD_OracleK"].notna().any():
+        summary_df["SHD_OracleK_Rank"] = summary_df["Avg_SHD_OracleK"].rank(ascending=True, method="min")
+    if "Avg_SID" in summary_df.columns and summary_df["Avg_SID"].notna().any():
         summary_df["SID_Rank"] = summary_df["Avg_SID"].rank(ascending=True, method="min")
     
-    ranking_cols = ["Method", "AUC_Rank", "AUPRC_Rank", "F1_Rank", "Time_Rank"]
-    if "SHD_Rank" in summary_df.columns:
-        ranking_cols.append("SHD_Rank")
-    if "Norm_SHD_Rank" in summary_df.columns:
-        ranking_cols.append("Norm_SHD_Rank")
+    ranking_cols = ["Method"]
+    if "AUC_Rank" in summary_df.columns:
+        ranking_cols.append("AUC_Rank")
+    if "AUPRC_Rank" in summary_df.columns:
+        ranking_cols.append("AUPRC_Rank")
+    if "F1_Thresh_Rank" in summary_df.columns:
+        ranking_cols.append("F1_Thresh_Rank")
+    if "F1_OracleK_Rank" in summary_df.columns:
+        ranking_cols.append("F1_OracleK_Rank")
+    if "Time_Rank" in summary_df.columns:
+        ranking_cols.append("Time_Rank")
+    if "SHD_Thresh_Rank" in summary_df.columns:
+        ranking_cols.append("SHD_Thresh_Rank")
+    if "SHD_OracleK_Rank" in summary_df.columns:
+        ranking_cols.append("SHD_OracleK_Rank")
     if "SID_Rank" in summary_df.columns:
         ranking_cols.append("SID_Rank")
     
     ranking_df = summary_df[ranking_cols].copy()
-    ranking_df = ranking_df.sort_values("AUC_Rank")
+    if "AUC_Rank" in ranking_df.columns:
+        ranking_df = ranking_df.sort_values("AUC_Rank")
     
     print("\nRanking by AUC (1 = best):")
-    print(ranking_df[["Method", "AUC_Rank"]].to_string(index=False))
+    if "AUC_Rank" in ranking_df.columns:
+        print(ranking_df[["Method", "AUC_Rank"]].to_string(index=False))
     
     print("\nRanking by AUPRC (1 = best):")
-    print(ranking_df[["Method", "AUPRC_Rank"]].to_string(index=False))
+    if "AUPRC_Rank" in ranking_df.columns:
+        print(ranking_df[["Method", "AUPRC_Rank"]].to_string(index=False))
+    
+    print("\nRanking by F1 Threshold (1 = best):")
+    if "F1_Thresh_Rank" in ranking_df.columns:
+        print(ranking_df[["Method", "F1_Thresh_Rank"]].to_string(index=False))
+    
+    print("\nRanking by F1 Oracle-K (1 = best):")
+    if "F1_OracleK_Rank" in ranking_df.columns:
+        print(ranking_df[["Method", "F1_OracleK_Rank"]].to_string(index=False))
     
     print("\nRanking by Time (1 = fastest):")
-    print(ranking_df[["Method", "Time_Rank"]].to_string(index=False))
+    if "Time_Rank" in ranking_df.columns:
+        print(ranking_df[["Method", "Time_Rank"]].to_string(index=False))
     
-    if "SHD_Rank" in ranking_df.columns:
-        print("\nRanking by SHD (1 = best, lowest):")
-        print(ranking_df[["Method", "SHD_Rank"]].to_string(index=False))
+    if "SHD_Thresh_Rank" in ranking_df.columns:
+        print("\nRanking by SHD Threshold (1 = best, lowest):")
+        print(ranking_df[["Method", "SHD_Thresh_Rank"]].to_string(index=False))
     
-    if "Norm_SHD_Rank" in ranking_df.columns:
-        print("\nRanking by Normalized SHD (1 = best, lowest):")
-        print(ranking_df[["Method", "Norm_SHD_Rank"]].to_string(index=False))
+    if "SHD_OracleK_Rank" in ranking_df.columns:
+        print("\nRanking by SHD Oracle-K (1 = best, lowest):")
+        print(ranking_df[["Method", "SHD_OracleK_Rank"]].to_string(index=False))
     
     if "SID_Rank" in ranking_df.columns:
         print("\nRanking by SID (1 = best, lowest):")
@@ -665,23 +894,21 @@ def main(directory="."):
         print("No valid result files loaded!")
         return
     
-    # Find common datasets
-    common_datasets = get_common_datasets(results_dict)
+    # Find all unique datasets
+    all_datasets = get_all_unique_datasets(results_dict)
     
-    if not common_datasets:
-        print("\nNo common datasets found across all result files!")
-        print("Available datasets per file:")
-        for filepath, results in results_dict.items():
-            print(f"  {method_names[filepath]}: {list(results.keys())}")
+    if not all_datasets:
+        print("\nNo datasets found across result files!")
         return
     
-    print(f"\nFound {len(common_datasets)} common dataset(s):")
-    for ds in sorted(common_datasets):
+    print(f"\nFound {len(all_datasets)} unique dataset(s):")
+    for ds in sorted(all_datasets):
         print(f"  - {ds}")
     
-    # Create comparison tables
-    comparison_df = create_comparison_table(results_dict, method_names, common_datasets)
-    summary_df = create_summary_table(results_dict, method_names, common_datasets)
+    # Create tables (using all datasets)
+    comparison_df = create_comparison_table(results_dict, method_names, all_datasets)
+    summary_df = create_summary_table(results_dict, method_names, all_datasets)
+    dataset_perf_df = create_long_format_table(results_dict, method_names, all_datasets)
     
     # Print results
     print_summary(summary_df)
@@ -697,6 +924,10 @@ def main(directory="."):
     summary_file = os.path.join(directory, "comparison_summary.csv")
     print(f"Saving summary to: {summary_file}")
     summary_df.to_csv(summary_file, index=False)
+
+    perf_file = os.path.join(directory, "dataset_performance.csv")
+    print(f"Saving dataset performance (long format) to: {perf_file}")
+    dataset_perf_df.to_csv(perf_file, index=False)
     
     print("\nComparison complete!")
 
