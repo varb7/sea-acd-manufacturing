@@ -1,0 +1,35 @@
+---
+ # Configuration for fine-tuning on 200 datasets with layer freezing
+data:
+    data_file: "data/your_200_datasets.csv"  # UPDATE THIS PATH
+    debug: False
+    batch_size: 1  # 16 for train, 1 for test
+    fci_vars: 5
+    fci_batches: 10
+    fci_batches_inference: 500
+    fci_batch_size: 500
+    num_workers: 0  # MUST BE 0: JPype cannot work with multi-process DataLoader
+                    # With workers >= 1, each process tries to initialize JVM
+                    # JPype cannot restart JVM after fork() → "JVM cannot be restarted" error
+                    # This makes data loading slower but is the ONLY stable solution
+    accumulate_batches: 1
+    log_frequency: 10
+    results_file: "results_rfci_finetuned.pkl"
+    use_learned_sampler: False
+model:
+    algorithm: "rfci"
+    model: "aggregator"
+    num_vars: 1000
+    num_edge_types: 5  # MUST match checkpoint (was trained with 5)
+    embed_dim: 64
+    transformer_num_layers: 4
+    n_heads: 8
+    ffn_embed_dim: 8
+train:
+    run_name: rfci-finetune-200
+    patience: 30          # Reduced from 50 for faster early stopping
+    epochs: 1000          # Reduced from 10000 (early stopping will trigger)
+    min_epochs: 50
+    lr: 1.e-5            # Reduced from 1e-4 to prevent catastrophic forgetting
+    weight_decay: 1.e-4  # Increased from 1e-5 for stronger regularization
+    metric: "Val/auprc"

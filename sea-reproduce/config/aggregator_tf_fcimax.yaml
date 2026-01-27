@@ -9,10 +9,10 @@ data:
   num_workers: 40
   accumulate_batches: 1
   log_frequency: 10
-  results_file: data/real_datasets_results/results_fci.pkl
+  results_file: data/real_datasets_results/results_fcimax.pkl
   use_learned_sampler: false
 model:
-  algorithm: fci
+  algorithm: fcimax
   model: aggregator
   num_vars: 1000
   num_edge_types: 8

@@ -6,13 +6,13 @@ data:
   fci_batches: 10
   fci_batches_inference: 500
   fci_batch_size: 500
-  num_workers: 40
+  num_workers: 4
   accumulate_batches: 1
   log_frequency: 10
-  results_file: data/real_datasets_results/results_fci.pkl
+  results_file: data/real_datasets_results/results_rfci_finetunednp.pkl
   use_learned_sampler: false
 model:
-  algorithm: fci
+  algorithm: gfci
   model: aggregator
   num_vars: 1000
   num_edge_types: 8
@@ -21,10 +21,10 @@ model:
   n_heads: 8
   ffn_embed_dim: 8
 train:
-  run_name: sc-rl
-  patience: 50
-  epochs: 10000
+  run_name: fci_train
+  patience: 30
+  epochs: 1000
   min_epochs: 50
-  lr: 0.0001
-  weight_decay: 1.0e-05
+  lr: 5.0e-05
+  weight_decay: 5.0e-05
   metric: Val/auprc
